@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">nglobal Logistics</string>
+    <string name="title_activity_main">nglobal Logistics</string>
+    <string name="package_name">com.nglobal.logistics</string>
+    <string name="custom_url_scheme">com.nglobal.logistics</string>
+</resources>
