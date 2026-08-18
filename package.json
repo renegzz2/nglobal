@@ -1,0 +1,68 @@
+{
+  "name": "copy-of-version-extendida-de-coordinacion",
+  "private": true,
+  "version": "0.0.0",
+  "main": "electron-main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts & vite",
+    "dev:server": "tsx server.ts",
+    "dev:client": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "desktop": "electron .",
+    "dist:desktop": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/camera": "^8.1.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/push-notifications": "^8.0.3",
+    "@capacitor/status-bar": "^8.0.2",
+    "@google/genai": "^1.40.0",
+    "@hello-pangea/dnd": "^18.0.1",
+    "@supabase/supabase-js": "^2.95.3",
+    "@tailwindcss/vite": "^4.3.2",
+    "@tanstack/react-query": "^5.101.0",
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0",
+    "tailwindcss": "^4.3.2",
+    "tsx": "^4.21.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  },
+  "build": {
+    "appId": "com.nglobal.logistics",
+    "productName": "nglobal Logistics",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.cjs",
+      "electron-preload.cjs",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.png"
+    }
+  }
+}

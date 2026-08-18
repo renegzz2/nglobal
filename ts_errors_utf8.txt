@@ -1,0 +1,10 @@
+supabase/functions/gemini-chat/index.ts(12,23): error TS2307: Cannot find module 'https://deno.land/std@0.168.0/http/server.ts' or its corresponding type declarations.
+supabase/functions/gemini-chat/index.ts(13,30): error TS2307: Cannot find module 'https://esm.sh/@supabase/supabase-js@2' or its corresponding type declarations.
+supabase/functions/gemini-chat/index.ts(14,29): error TS2307: Cannot find module 'https://esm.sh/@google/genai' or its corresponding type declarations.
+supabase/functions/send-push/index.ts(6,23): error TS2307: Cannot find module 'https://deno.land/std@0.168.0/http/server.ts' or its corresponding type declarations.
+supabase/functions/send-push/index.ts(7,30): error TS2307: Cannot find module 'https://esm.sh/@supabase/supabase-js@2' or its corresponding type declarations.
+supabase/functions/send-push/index.ts(8,21): error TS2307: Cannot find module 'npm:web-push@3.6.7' or its corresponding type declarations.
+supabase/functions/tive-webhook/index.ts(6,23): error TS2307: Cannot find module 'https://deno.land/std@0.168.0/http/server.ts' or its corresponding type declarations.
+supabase/functions/tive-webhook/index.ts(7,30): error TS2307: Cannot find module 'https://esm.sh/@supabase/supabase-js@2' or its corresponding type declarations.
+supabase_edge_function.ts(10,23): error TS2307: Cannot find module 'https://deno.land/std@0.168.0/http/server.ts' or its corresponding type declarations.
+supabase_edge_function.ts(11,30): error TS2307: Cannot find module 'https://esm.sh/@supabase/supabase-js@2' or its corresponding type declarations.

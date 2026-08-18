@@ -1,0 +1,7 @@
+{
+  "name": "Copy of VERSION EXTENDIDA DE COORDINACION",
+  "description": "ESTA ES LA VERSIION MAS AVANZADA",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

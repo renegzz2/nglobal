@@ -1,0 +1,8 @@
+CLIENTE ID
+sac6o63294qq9949gqtcm8joq
+
+CLIENT SECRET
+t7llihkpda4mrk6nvtj3fijkfsh3qjick82l6ru3548a4p59nmh
+
+TENANT ID
+51db2b85-ebc0-4779-a279-3066ce742c3e
