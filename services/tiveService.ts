@@ -1,4 +1,3 @@
-
 import { TiveEvent } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -31,28 +30,46 @@ export const getAlertDictionary = async (): Promise<Record<string, TiveAlertTran
  * Obtiene el historial real de eventos desde la base de datos Supabase.
  */
 export const getTiveHistory = async (trackerId: string): Promise<TiveEvent[]> => {
+    // 1. Filtro Anti-Crash: Si el ID viene nulo o es texto "NULL", abortamos la consulta.
+    if (!trackerId || trackerId === 'NULL' || trackerId === 'NA') {
+        return [];
+    }
+
     const { data, error } = await supabase
         .from('tive_events')
         .select('*')
-        .eq('tracker_id', trackerId)
+        // 2. Limpieza de formato: .trim() elimina espacios invisibles antes o después del ID
+        .eq('tracker_id', trackerId.trim())
         .order('timestamp', { ascending: false })
         .limit(50);
 
     if (error) {
         console.error("Error al obtener datos reales de Tive:", error.message);
-        throw error;
+        return [];
     }
 
-    return data as TiveEvent[];
+    // 3. Sanitización Estricta: Obligamos a que la temperatura sea un Número real o null.
+    const sanitizedData = (data || []).map(event => ({
+        ...event,
+        temperature: (event.temperature != null && !isNaN(Number(event.temperature))) 
+            ? Number(event.temperature) 
+            : null
+    }));
+
+    return sanitizedData as TiveEvent[];
 };
 
 /**
  * Inserta un evento de prueba para verificar la conexión en la interfaz.
  */
 export const sendTestSignal = async (trackerId: string) => {
+    if (!trackerId || trackerId === 'NULL' || trackerId === 'NA') {
+        throw new Error("Tracker ID inválido para prueba");
+    }
+
     // MI DIOS: Generamos valores en Fahrenheit realistas para la prueba (75°F - 78°F)
     const { error } = await supabase.from('tive_events').insert({
-        tracker_id: trackerId,
+        tracker_id: trackerId.trim(),
         temperature: parseFloat((75 + Math.random() * 3).toFixed(2)),
         humidity: Math.floor(40 + Math.random() * 20),
         location: 'Ubicación de Prueba, TX',
