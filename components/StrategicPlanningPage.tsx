@@ -774,8 +774,8 @@ const StrategicPlanningPage: React.FC<StrategicPlanningPageProps> = ({
                                                                                     <span className={tieneCanjes ? 'opacity-50' : ''}>{productoNombre}</span>
                                                                                 </div>
                                                                             </td>
-                                                                            <td className="px-4 py-0.5 text-center font-black text-primary">${((p as any).ng2025 || p.venta2025Referencia || 0).toLocaleString()}</td>
-                                                                            <td className="px-4 py-0.5 text-center font-black text-text-secondary">${((p as any).ss2025 || p.precioCompra2025 || 0).toLocaleString()}</td>
+                                                                            <td className="px-4 py-0.5 text-center font-black text-primary">{((p as any).ng2025 || p.venta2025Referencia || 0).toLocaleString()}</td>
+                                                                            <td className="px-4 py-0.5 text-center font-black text-text-secondary">{((p as any).ss2025 || p.precioCompra2025 || 0).toLocaleString()}</td>
                                                                             <td className="px-4 py-0.5 text-center font-black text-primary">{p.presupuestoMonetario?.toLocaleString() || '0'}</td>
                                                                             <td className="px-4 py-0.5 text-center bg-accent/5">
                                                                                 {tieneCanjes ? (
