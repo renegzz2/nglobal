@@ -95,7 +95,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         }
     }, [isOpen, fetchData, report.logisticStatus]);
 
-    // JEFE: GENERADOR DE PDF PROFESIONAL (INTERVENCIÓN QUIRÚRGICA REQUERIDA)
     const handleExportPDF = () => {
         addNotification({ type: 'info', title: 'Documento Logístico', message: 'Renderizando Ficha Técnica Oficial...' });
         
@@ -382,7 +381,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         const weightLimit = 21000; // KG
         const needsScale = totalWeight > weightLimit;
         
-        // Parámetros cumplidos si: Horas fuera de rango < 5% del tiempo total y no hay retraso crítico
         const routeCompliance = transitHours > 0 ? (hoursOutOfRange / transitHours < 0.05) : true;
 
         return { totalWeight, transitHours, hoursOutOfRange, needsScale, routeCompliance };
@@ -682,13 +680,13 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="bg-primary p-4 rounded-xl text-white shadow-lg relative overflow-hidden mt-auto">
-                                            <div className="absolute top-0 right-0 w-16 h-16 bg-white/5 rounded-full -translate-y-8 translate-x-8"></div>
-                                            <span className="text-[8px] font-black uppercase tracking-[0.3em] opacity-70">Set-Point Autorizado</span>
-                                            <div className="flex items-baseline gap-2 mt-1">
-                                                <p className="text-3xl font-black">{mainProductSpec?.tempOptima || '--'}</p>
-                                                <span className="text-xs font-bold opacity-80">°F FAHRENHEIT</span>
-                                            </div>
+                                    </div>
+                                    <div className="bg-primary p-4 rounded-xl text-white shadow-lg relative overflow-hidden mt-auto">
+                                        <div className="absolute top-0 right-0 w-16 h-16 bg-white/5 rounded-full -translate-y-8 translate-x-8"></div>
+                                        <span className="text-[8px] font-black uppercase tracking-[0.3em] opacity-70">Set-Point Autorizado</span>
+                                        <div className="flex items-baseline gap-2 mt-1">
+                                            <p className="text-3xl font-black">{mainProductSpec?.tempOptima || '--'}</p>
+                                            <span className="text-xs font-bold opacity-80">°F FAHRENHEIT</span>
                                         </div>
                                     </div>
                                 </div>
@@ -700,22 +698,32 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                 <div className="bg-white p-6 rounded-2xl border border-border text-center shadow-sm relative overflow-hidden group">
                                     <div className="absolute top-0 left-0 w-full h-1 bg-primary"></div>
                                     <span className="text-[10px] text-text-muted font-black uppercase tracking-widest">Temperatura Actual (°F)</span>
-                                    <p className={`text-4xl font-black mt-2 ${(liveData?.temp && mainProductSpec?.tempOptima && Math.abs(liveData.temp - Number(mainProductSpec.tempOptima)) > 4) ? 'text-danger' : 'text-success'}`}>{liveData?.temp !== null ? Number(liveData?.temp).toFixed(2) + '°F' : '--'}</p>
+                                    <p className={`text-4xl font-black mt-2 ${(liveData?.temp != null && mainProductSpec?.tempOptima && Math.abs(liveData.temp - Number(mainProductSpec.tempOptima)) > 4) ? 'text-danger' : 'text-success'}`}>
+                                        {liveData?.temp != null && !isNaN(Number(liveData.temp)) ? `${Number(liveData.temp).toFixed(1)}°F` : 'Sin telemetría'}
+                                    </p>
                                 </div>
                             </div>
-                            <div className="bg-white p-8 rounded-2xl border border-border h-[400px] shadow-inner relative">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={chartData}>
-                                        <defs>
-                                            <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/></linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                        <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
-                                        <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
-                                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
-                                        <Area type="monotone" dataKey="temp" stroke="#2563eb" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={4} />
-                                    </AreaChart>
-                                </ResponsiveContainer>
+                            <div className="bg-white p-8 rounded-2xl border border-border h-[400px] shadow-inner relative flex flex-col justify-center">
+                                {chartData && chartData.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart data={chartData}>
+                                            <defs>
+                                                <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/></linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
+                                            <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
+                                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
+                                            <Area type="monotone" dataKey="temp" stroke="#2563eb" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={4} />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="flex items-center justify-center h-full border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+                                        <p className="text-sm font-bold text-gray-400 uppercase tracking-widest text-center px-4">
+                                            Esperando primera lectura del sensor...
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ) : activeTab === 'location' ? (
