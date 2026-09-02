@@ -14,79 +14,90 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1. EXTRAER DATOS
     const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id;
-    const alertType = payload.alert?.type || 'NORMAL';
+    const alertType = (payload.alert?.type || 'NORMAL').toLowerCase();
     const isAlert = !!payload.alert;
 
     if (!trackerId) {
         return new Response(JSON.stringify({ success: true, message: "Sin Tracker ID" }), { status: 200 });
     }
 
-    // --- 🛡️ NUEVO FILTRO: VERIFICAR SI EL TRACKER ESTÁ EN UN VIAJE ACTIVO ---
-    // Buscamos si el tracker está asignado a un viaje en USA que NO esté Finalizado
-    const { data: activeUsa } = await supabase
-        .from('usa_shipment_reports')
-        .select('id')
-        .eq('tive_tracker_id', trackerId)
-        .neq('logistic_status', 'Finalizado')
-        .limit(1);
+    // --- 1. BUSCAR VIAJE ACTIVO ---
+    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('id, trip_id, real_departure_date').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
+    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('id, trip_id, real_departure_date').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
 
-    // Buscamos si el tracker está asignado a un viaje Nacional que NO esté Finalizado
-    const { data: activeNac } = await supabase
-        .from('nacional_shipment_reports')
-        .select('id')
-        .eq('tive_tracker_id', trackerId)
-        .neq('logistic_status', 'Finalizado')
-        .limit(1);
+    let activeTrip = null;
+    let tripTableName = null;
 
-    const isActive = (activeUsa && activeUsa.length > 0) || (activeNac && activeNac.length > 0);
-
-    if (!isActive) {
-        console.log(`🛑 IGNORADO: El rastreador ${trackerId} está encendido, pero NO tiene viajes activos en NGLOBAL.`);
-        return new Response(JSON.stringify({ success: true, message: "Tracker inactivo ignorado" }), { status: 200 });
+    if (activeUsa && activeUsa.length > 0) {
+        activeTrip = activeUsa[0];
+        tripTableName = 'usa_shipment_reports';
+    } else if (activeNac && activeNac.length > 0) {
+        activeTrip = activeNac[0];
+        tripTableName = 'nacional_shipment_reports';
     }
-    // ------------------------------------------------------------------------
 
-    console.log("📦 PAYLOAD ACEPTADO PARA TRACKER ACTIVO:", trackerId);
+    if (!activeTrip) {
+        console.log(`🛑 IGNORADO: El rastreador ${trackerId} NO tiene viajes activos.`);
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
 
-    // 2. MODO GRABADORA: Guardar Telemetría si existen los datos
-    if (payload.Temperature || payload.Location || payload.location) {
-        const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
-        const hum = payload.Humidity?.Percentage ?? null;
-        const lat = payload.Location?.Latitude ?? payload.location?.latitude ?? null;
-        const lng = payload.Location?.Longitude ?? payload.location?.longitude ?? null;
-        const locName = payload.Location?.FormattedAddress ?? payload.location?.address ?? 'Ubicación Desconocida';
-        const bat = payload.Battery?.Percentage ?? null;
-        const time = payload.EntryTimeUtc || new Date().toISOString();
+    // Variables de telemetría comunes
+    const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
+    const hum = payload.Humidity?.Percentage ?? null;
+    const lat = payload.Location?.Latitude ?? payload.location?.latitude ?? null;
+    const lng = payload.Location?.Longitude ?? payload.location?.longitude ?? null;
+    const locName = payload.Location?.FormattedAddress ?? payload.location?.address ?? 'Ubicación Desconocida';
+    const bat = payload.Battery?.Percentage ?? null;
+    const time = payload.EntryTimeUtc || new Date().toISOString();
 
-        const { error: insertError } = await supabase.from('tive_events').insert({
-            tracker_id: trackerId,
-            temperature: tempF,
-            humidity: hum,
-            lat: lat,
-            lng: lng,
-            location: locName,
-            battery: bat,
-            timestamp: time,
-            alert_type: alertType
+    // --- 2. EVALUAR INICIO DE VIAJE AUTOMÁTICO ---
+    let isFirstPing = false;
+    if (!activeTrip.real_departure_date && lat !== null) {
+        isFirstPing = true;
+        console.log(`🚀 INICIO DE VIAJE DETECTADO para folio ${activeTrip.trip_id}`);
+        // Actualizamos BD: Ya salió y está en tránsito
+        await supabase.from(tripTableName).update({ 
+            real_departure_date: time, 
+            logistic_status: 'En Tránsito' 
+        }).eq('id', activeTrip.id);
+    }
+
+    // --- 3. GUARDAR TELEMETRÍA (Siempre) ---
+    if (tempF !== null || lat !== null) {
+        await supabase.from('tive_events').insert({
+            tracker_id: trackerId, temperature: tempF, humidity: hum, lat: lat, lng: lng, location: locName, battery: bat, timestamp: time, alert_type: alertType
         });
-
-        if (insertError) console.error("❌ Error al guardar telemetría:", insertError);
     }
 
-    // 3. MODO ALARMA: Si es un reporte normal, terminamos aquí.
-    if (!isAlert || (alertType !== 'route_deviation' && alertType !== 'temperature')) {
-        return new Response(JSON.stringify({ success: true, message: "Telemetría guardada sin alerta" }), { status: 200 });
+    // --- 4. DECIDIR SI REQUIERE WHATSAPP ---
+    const requiresNotification = isFirstPing || alertType === 'route_deviation' || alertType === 'temperature';
+
+    if (!requiresNotification) {
+        console.log("🔵 Telemetría guardada sin requerir notificación.");
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
-    // 4. FLUJO DE WHATSAPP (Solo pasa si es una Alerta Crítica)
-    console.log("🚨 ALERTA CRÍTICA DETECTADA. Analizando turnos para:", alertType);
+    // --- 5. PREPARAR MENSAJE DE WHATSAPP ---
+    let motivoTexto = "Notificación de Sistema";
+    let detallesTexto = "Revisar plataforma.";
 
+    if (isFirstPing) {
+        motivoTexto = "🟢 INICIO DE VIAJE";
+        detallesTexto = `El sensor inició transmisión. El viaje cambió a 'En Tránsito' automáticamente.`;
+    } else if (alertType === 'temperature') {
+        motivoTexto = "🌡️ ALERTA: TEMPERATURA";
+        detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros configurados.`;
+    } else if (alertType === 'route_deviation') {
+        motivoTexto = "📍 ALERTA: DESVÍO";
+        detallesTexto = `Posible desvío detectado. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+    }
+
+    console.log(`🚨 DISPARANDO WHATSAPP: ${motivoTexto}`);
+
+    // --- 6. ENVÍO DE WHATSAPP A PERSONAL EN TURNO ---
     const { data: recipients } = await supabase.from('alert_recipients').select('*');
-
-    const mxDateStr = new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" });
-    const mxDate = new Date(mxDateStr);
+    const mxDate = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
     const diaActual = mxDate.getDay(); 
     const horaActual = mxDate.getHours(); 
     
@@ -100,45 +111,38 @@ serve(async (req) => {
                 if (!diasPermitidos.includes(diaActual)) continue; 
             }
             if (person.hora_inicio !== null && person.hora_fin !== null) {
-                if (horaActual >= person.hora_inicio && horaActual < person.hora_fin) {
-                    phonesToNotify.push(person.telefono);
-                }
+                if (horaActual >= person.hora_inicio && horaActual < person.hora_fin) phonesToNotify.push(person.telefono);
             } else {
                 phonesToNotify.push(person.telefono);
             }
         }
     }
 
-    if (phonesToNotify.length === 0) {
-        return new Response(JSON.stringify({ success: true, message: "Sin destinatarios activos" }), { status: 200 });
+    if (phonesToNotify.length > 0) {
+        const phoneId = Deno.env.get('phone_number_id_wpp');
+        const accessToken = Deno.env.get('whatsapp_token_');
+        const folioViaje = activeTrip.trip_id || 'Sin Folio';
+
+        const sendPromises = phonesToNotify.map(async phone => {
+            const cleanPhone = phone.replace(/\D/g, ''); 
+            await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    to: cleanPhone,
+                    type: "template",
+                    template: {
+                        name: "alerta_tive_desvio", 
+                        language: { code: "es_MX" }, 
+                        components: [{ type: "body", parameters: [{ type: "text", text: folioViaje }, { type: "text", text: trackerId }, { type: "text", text: motivoTexto }, { type: "text", text: detallesTexto }] }]
+                    }
+                })
+            });
+        });
+        await Promise.all(sendPromises);
     }
 
-    let motivoTexto = alertType === 'temperature' ? "Desvío de Temperatura 🌡️" : "Desvío de Ruta 📍";
-    let detallesTexto = alertType === 'route_deviation' ? `${payload.Location?.FormattedAddress || payload.location?.address || 'Sin ub.'}. Mapa: https://maps.google.com/?q=${payload.Location?.Latitude || payload.location?.latitude},${payload.Location?.Longitude || payload.location?.longitude}` : "Revisar plataforma.";
-
-    const phoneId = Deno.env.get('phone_number_id_wpp');
-    const accessToken = Deno.env.get('whatsapp_token_');
-
-    const sendPromises = phonesToNotify.map(async phone => {
-      const cleanPhone = phone.replace(/\D/g, ''); 
-      const response = await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: cleanPhone,
-          type: "template",
-          template: {
-            name: "alerta_tive_desvio", 
-            language: { code: "es_MX" }, 
-            components: [{ type: "body", parameters: [{ type: "text", text: payload.ShipmentId || payload.shipment?.id || 'Desc' }, { type: "text", text: trackerId }, { type: "text", text: motivoTexto }, { type: "text", text: detallesTexto }] }]
-          }
-        })
-      });
-      return await response.json();
-    });
-
-    await Promise.all(sendPromises);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
 
   } catch (error) {
