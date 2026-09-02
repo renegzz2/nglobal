@@ -15,6 +15,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id;
+    // Forzamos minúsculas para que nunca falle por una letra mayúscula enviada por Tive
     const alertType = (payload.alert?.type || 'NORMAL').toLowerCase();
     const isAlert = !!payload.alert;
 
@@ -56,7 +57,6 @@ serve(async (req) => {
     if (!activeTrip.real_departure_date && lat !== null) {
         isFirstPing = true;
         console.log(`🚀 INICIO DE VIAJE DETECTADO para folio ${activeTrip.trip_id}`);
-        // Actualizamos BD: Ya salió y está en tránsito
         await supabase.from(tripTableName).update({ 
             real_departure_date: time, 
             logistic_status: 'En Tránsito' 
@@ -71,7 +71,9 @@ serve(async (req) => {
     }
 
     // --- 4. DECIDIR SI REQUIERE WHATSAPP ---
-    const requiresNotification = isFirstPing || alertType === 'route_deviation' || alertType === 'temperature';
+    // Agregamos la validación para paradas prolongadas (stop)
+    const isStopAlert = alertType.includes('stop');
+    const requiresNotification = isFirstPing || alertType === 'route_deviation' || alertType === 'temperature' || isStopAlert;
 
     if (!requiresNotification) {
         console.log("🔵 Telemetría guardada sin requerir notificación.");
@@ -87,10 +89,13 @@ serve(async (req) => {
         detallesTexto = `El sensor inició transmisión. El viaje cambió a 'En Tránsito' automáticamente.`;
     } else if (alertType === 'temperature') {
         motivoTexto = "🌡️ ALERTA: TEMPERATURA";
-        detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros configurados.`;
+        detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
     } else if (alertType === 'route_deviation') {
         motivoTexto = "📍 ALERTA: DESVÍO";
-        detallesTexto = `Posible desvío detectado. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        detallesTexto = `Posible desvío de ruta detectado. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+    } else if (isStopAlert) {
+        motivoTexto = "⏱️ ALERTA: PARADA PROLONGADA";
+        detallesTexto = `El envío se detuvo más de 1 hora. Mapa: https://maps.google.com/?q=${lat},${lng}`;
     }
 
     console.log(`🚨 DISPARANDO WHATSAPP: ${motivoTexto}`);
