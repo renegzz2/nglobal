@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { toCamelCase, toSnakeCase } from '../utils/formatters';
 import Card from './ui/Card';
-import { DownloadIcon, PencilIcon, TrashIcon, ExclamationIcon, ChartBarIcon, BoxIcon } from './icons';
+import { DownloadIcon, PencilIcon, TrashIcon, ExclamationIcon, ChartBarIcon, BoxIcon, CalendarIcon } from './icons';
 import { useNotification } from './NotificationProvider';
 import ConfirmModal from './ConfirmModal';
 import { UserRole } from '../types';
@@ -13,7 +13,8 @@ interface ExecutiveData {
   id: string;
   categoria: string;
   nombreDelProducto: string;
-  ventaNg2025: number;
+  referenciaNg: number;
+  referenciaSs: number;
   presupuesto: number;
   proyeccionCajas: number;
   realAcumulado: number;
@@ -58,18 +59,21 @@ function getCurrentWeek(): number {
 const ClientReportDashboard: React.FC = () => {
   const { addNotification } = useNotification();
   const [userRole, setUserRole] = useState<string | null>(null);
+  
   const [activeWeek, setActiveWeek] = useState<number>(getCurrentWeek());
+  const [referenceYear, setReferenceYear] = useState<number>(new Date().getFullYear());
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
+    start: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0]
+  });
+  const [useDateRange, setUseDateRange] = useState(false);
+
   const [data, setData] = useState<ExecutiveData[]>([]);
   const [projectPerformance, setProjectPerformance] = useState<ProjectPerformance[]>([]);
   const [logisticsQualityData, setLogisticsQualityData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'table' | 'charts'>('table');
   const [reportMode, setReportMode] = useState<'auto' | 'cierre' | 'proyeccion'>('auto');
-  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
-    start: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  });
-  const [useDateRange, setUseDateRange] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -80,7 +84,7 @@ const ClientReportDashboard: React.FC = () => {
     const savedUser = localStorage.getItem('ng_auth_profile');
     if (savedUser) setUserRole(JSON.parse(savedUser).role);
     fetchData();
-  }, [activeWeek, dateRange, useDateRange]);
+  }, [activeWeek, dateRange, useDateRange, referenceYear]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -102,7 +106,6 @@ const ClientReportDashboard: React.FC = () => {
       const productStats: Record<string, number> = {};
       const projectRealStats: Record<string, number> = {};
       
-      // Calculate Real from shipments
       shipmentRes.data?.forEach(report => {
         const depDate = report.real_departure_date || report.departure_date_time;
         if (!depDate) return;
@@ -130,11 +133,9 @@ const ClientReportDashboard: React.FC = () => {
         }
       });
 
-      // Aggregate for main table
       const aggregated: Record<string, ExecutiveData> = {};
       const productTotalsAdded: Record<string, Set<string>> = {};
 
-      // Aggregate for projects
       const projAgg: Record<string, { proyeccion: number, real: number, name: string }> = {};
       projects.forEach(p => {
           projAgg[p.id] = { proyeccion: 0, real: projectRealStats[p.id] || 0, name: p.nombre };
@@ -151,7 +152,8 @@ const ClientReportDashboard: React.FC = () => {
             id: p.id,
             categoria: cat,
             nombreDelProducto: name,
-            ventaNg2025: 0,
+            referenciaNg: 0,
+            referenciaSs: 0,
             presupuesto: 0,
             proyeccionCajas: 0,
             realAcumulado: 0,
@@ -160,7 +162,19 @@ const ClientReportDashboard: React.FC = () => {
           productTotalsAdded[key] = new Set();
         }
 
-        aggregated[key].ventaNg2025 += Number(p.venta_2025_referencia || p.venta_ng2025 || 0);
+        const refs = p.referencias_anuales || {};
+        const refAnio = refs[referenceYear] || { ng: 0, ss: 0 };
+        
+        let valNg = Number(refAnio.ng || 0);
+        let valSs = Number(refAnio.ss || 0);
+        
+        if (referenceYear === 2025 && valNg === 0 && valSs === 0) {
+            valNg = Number(p.ng_2025 || 0);
+            valSs = Number(p.ss_2025 || 0);
+        }
+
+        aggregated[key].referenciaNg += valNg;
+        aggregated[key].referenciaSs += valSs;
         aggregated[key].presupuesto += Number(p.presupuesto_monetario || p.presupuesto || 0);
         aggregated[key].proyeccionCajas += Number(p.proyeccion_cajas || 0);
         aggregated[key].sourceIds?.push(p.id);
@@ -170,7 +184,6 @@ const ClientReportDashboard: React.FC = () => {
           productTotalsAdded[key].add(p.producto_id);
         }
 
-        // Project aggregations
         if (p.proyecto_id && projAgg[p.proyecto_id]) {
             projAgg[p.proyecto_id].proyeccion += Number(p.proyeccion_cajas || 0);
         }
@@ -185,7 +198,6 @@ const ClientReportDashboard: React.FC = () => {
           cumplimiento: info.proyeccion > 0 ? Math.round((info.real / info.proyeccion) * 100) : 0
       })).filter(p => p.proyeccion > 0 || p.real > 0));
 
-      // Calculate Logistics and Quality KPIs
       const qualityStats = {
           transit: { tolerable: 0, nonTolerable: 0 },
           temp: { correct: 0, outOfRange: 0 }
@@ -201,9 +213,8 @@ const ClientReportDashboard: React.FC = () => {
               else qualityStats.transit.nonTolerable++;
           }
 
-          // Quality/Temp check
           const ideal = Number(report.ideal_temp || report.temperature || 0);
-          const real = Number(report.arrival_temp || 0); // Placeholder for final temp audit
+          const real = Number(report.arrival_temp || 0); 
           if (ideal > 0 && real > 0) {
               if (Math.abs(real - ideal) <= 4) qualityStats.temp.correct++;
               else qualityStats.temp.outOfRange++;
@@ -224,16 +235,18 @@ const ClientReportDashboard: React.FC = () => {
     const isCierre = effectiveMode === 'cierre';
     
     const headers = isCierre 
-        ? ["Categoria", "Producto", "Ref 2025", "Presupuesto", "Proyeccion", "Real Cajas", "% Confiabilidad"]
-        : ["Categoria", "Producto", "Ref 2025", "Presupuesto", "Proyeccion", "Alc. Ppto", "Alc. Venta"];
+        ? ["Categoria", "Producto", `Ref NG ${referenceYear}`, `Ref SS ${referenceYear}`, "Presupuesto", "Proyeccion", "Real Cajas", "% Confiabilidad"]
+        : ["Categoria", "Producto", `Ref NG ${referenceYear}`, `Ref SS ${referenceYear}`, "Presupuesto", "Proyeccion", "Alc. Ppto", "Alc. Venta (Total)"];
         
     const rows = data.map(d => {
-      const basic = [d.categoria, d.nombreDelProducto, d.ventaNg2025, d.presupuesto, d.proyeccionCajas];
+      const basic = [d.categoria, d.nombreDelProducto, d.referenciaNg, d.referenciaSs, d.presupuesto, d.proyeccionCajas];
+      const totalRef = d.referenciaNg + d.referenciaSs;
+      
       if (isCierre) {
           return [...basic, d.realAcumulado, `${d.proyeccionCajas > 0 ? Math.round((d.realAcumulado / d.proyeccionCajas) * 100) : 0}%`];
       } else {
           const alcPpto = d.presupuesto > 0 ? Math.round((d.proyeccionCajas / d.presupuesto) * 100) : 0;
-          const alcVenta = d.ventaNg2025 > 0 ? Math.round((d.proyeccionCajas / d.ventaNg2025) * 100) : 0;
+          const alcVenta = totalRef > 0 ? Math.round((d.proyeccionCajas / totalRef) * 100) : 0;
           return [...basic, `${alcPpto}%`, `${alcVenta}%`];
       }
     });
@@ -241,7 +254,7 @@ const ClientReportDashboard: React.FC = () => {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Matriz_Ejecutiva_W${activeWeek}.csv`);
+    link.setAttribute("download", `Matriz_Ejecutiva_W${activeWeek}_${referenceYear}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -253,22 +266,26 @@ const ClientReportDashboard: React.FC = () => {
     let rowsHtml = '';
     const effectiveMode = reportMode === 'auto' ? (globalTotals.real > 0 ? 'cierre' : 'proyeccion') : reportMode;
     const isCierre = effectiveMode === 'cierre';
-    const pdfColumnCount = isCierre ? 8 : 6;
+    const pdfColumnCount = isCierre ? 9 : 7;
 
     sortedGroupedData.forEach(([cat, items]) => {
-      const categoryRef2025 = items.reduce((acc, curr) => acc + curr.ventaNg2025, 0);
+      const categoryRefNg = items.reduce((acc, curr) => acc + curr.referenciaNg, 0);
+      const categoryRefSs = items.reduce((acc, curr) => acc + curr.referenciaSs, 0);
       const categoryPresupuesto = items.reduce((acc, curr) => acc + curr.presupuesto, 0);
       const categoryProyeccion = items.reduce((acc, curr) => acc + curr.proyeccionCajas, 0);
       const categoryReal = items.reduce((acc, curr) => acc + curr.realAcumulado, 0);
+      
+      const totalCategoryRef = categoryRefNg + categoryRefSs;
       const categoryAlcPpto = getPercent(categoryProyeccion, categoryPresupuesto);
-      const categoryAlcVenta = getPercent(categoryProyeccion, categoryRef2025);
+      const categoryAlcVenta = getPercent(categoryProyeccion, totalCategoryRef);
       const categoryConfiabilidad = getPercent(categoryReal, categoryProyeccion);
 
       rowsHtml += `<tr class="category-row"><td colspan="${pdfColumnCount}">${cat}</td></tr>`;
       rowsHtml += `
 	        <tr class="category-total-row">
 	          <td>Total ${cat}</td>
-	          <td style="text-align: center;">${categoryRef2025.toLocaleString()}</td>
+	          <td style="text-align: center;">${categoryRefNg.toLocaleString()}</td>
+	          <td style="text-align: center;">${categoryRefSs.toLocaleString()}</td>
 	          <td style="text-align: center;">${categoryPresupuesto.toLocaleString()}</td>
 	          <td style="text-align: center;">${categoryProyeccion.toLocaleString()}</td>
 	          ${isCierre ? `
@@ -284,14 +301,16 @@ const ClientReportDashboard: React.FC = () => {
       `;
 
       items.forEach(item => {
+        const totalItemRef = item.referenciaNg + item.referenciaSs;
         const alcPpto = getPercent(item.proyeccionCajas, item.presupuesto);
-        const alcVenta = getPercent(item.proyeccionCajas, item.ventaNg2025);
+        const alcVenta = getPercent(item.proyeccionCajas, totalItemRef);
         const confiabilidad = getPercent(item.realAcumulado, item.proyeccionCajas);
 
         rowsHtml += `
 	          <tr>
 	            <td style="font-weight: 700; color: #1E293B;">${item.nombreDelProducto}</td>
-	            <td style="text-align: center; color: #334155;">${item.ventaNg2025.toLocaleString()}</td>
+	            <td style="text-align: center; color: #334155;">${item.referenciaNg.toLocaleString()}</td>
+	            <td style="text-align: center; color: #334155;">${item.referenciaSs.toLocaleString()}</td>
 	            <td style="text-align: center; color: #334155;">${item.presupuesto.toLocaleString()}</td>
 	            <td style="text-align: center; font-weight: 700; color: #0F172A;">${item.proyeccionCajas.toLocaleString()}</td>
 	            ${isCierre ? `
@@ -309,11 +328,11 @@ const ClientReportDashboard: React.FC = () => {
     });
 
     const totalAlcPpto = getPercent(globalTotals.proyeccion, globalTotals.presupuesto);
-    const totalAlcVenta = getPercent(globalTotals.proyeccion, globalTotals.ref2025);
+    const totalAlcVenta = getPercent(globalTotals.proyeccion, globalTotals.refTotal);
     const totalConfiabilidad = getPercent(globalTotals.real, globalTotals.proyeccion);
     const html = `<html>
       <head>
-        <title>NGLOBAL_${isCierre ? 'Cierre' : 'Proyeccion'}_W${activeWeek}</title>
+        <title>NGLOBAL_${isCierre ? 'Cierre' : 'Proyeccion'}_W${activeWeek}_${referenceYear}</title>
         <style>
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
           body { font-family: 'Inter', sans-serif; padding: 40px; color: #333; }
@@ -335,7 +354,7 @@ const ClientReportDashboard: React.FC = () => {
         <div class="header">
           <div class="header-content">
             <h1>REPORTE EJECUTIVO - SEMANA ${activeWeek}</h1>
-            <p>NGLOBAL LOGISTICS - PERFORMANCE ESTRATÉGICO</p>
+            <p>NGLOBAL LOGISTICS - PERFORMANCE ESTRATÉGICO AÑO BASE ${referenceYear}</p>
           </div>
           <img src="https://sucvgevhsmxrpkpvrblm.supabase.co/storage/v1/object/public/storage/logong.jpeg" alt="NGLOBAL Logo" class="logo" />
         </div>
@@ -343,7 +362,8 @@ const ClientReportDashboard: React.FC = () => {
           <thead>
             <tr>
               <th>Producto</th>
-              <th style="text-align: center;">Ref 2025</th>
+              <th style="text-align: center;">NG ${referenceYear}</th>
+              <th style="text-align: center;">SS ${referenceYear}</th>
               <th style="text-align: center;">Presupuesto</th>
               <th style="text-align: center;">Proyección</th>
 	              ${isCierre ? `
@@ -363,7 +383,8 @@ const ClientReportDashboard: React.FC = () => {
 	            ${rowsHtml}
 	            <tr class="grand-total-row">
 	              <td>TOTAL GENERAL</td>
-	              <td style="text-align: center;">${globalTotals.ref2025.toLocaleString()}</td>
+	              <td style="text-align: center;">${globalTotals.refNg.toLocaleString()}</td>
+	              <td style="text-align: center;">${globalTotals.refSs.toLocaleString()}</td>
 	              <td style="text-align: center;">${globalTotals.presupuesto.toLocaleString()}</td>
 	              <td style="text-align: center;">${globalTotals.proyeccion.toLocaleString()}</td>
 	              ${isCierre ? `
@@ -392,7 +413,9 @@ const ClientReportDashboard: React.FC = () => {
 
   const globalTotals = useMemo(() => {
     return {
-      ref2025: data.reduce((acc, curr) => acc + (Number(curr.ventaNg2025) || 0), 0),
+      refNg: data.reduce((acc, curr) => acc + (Number(curr.referenciaNg) || 0), 0),
+      refSs: data.reduce((acc, curr) => acc + (Number(curr.referenciaSs) || 0), 0),
+      refTotal: data.reduce((acc, curr) => acc + (Number(curr.referenciaNg) || 0) + (Number(curr.referenciaSs) || 0), 0),
       presupuesto: data.reduce((acc, curr) => acc + (Number(curr.presupuesto) || 0), 0),
       proyeccion: data.reduce((acc, curr) => acc + (Number(curr.proyeccionCajas) || 0), 0),
       real: data.reduce((acc, curr) => acc + (Number(curr.realAcumulado) || 0), 0)
@@ -401,13 +424,13 @@ const ClientReportDashboard: React.FC = () => {
 
   const globalPercentage = useMemo(() => getPercent(globalTotals.real, globalTotals.proyeccion), [globalTotals]);
 
-  const globalRealVSRef = useMemo(() => getPercent(globalTotals.real, globalTotals.ref2025), [globalTotals]);
+  const globalRealVSRef = useMemo(() => getPercent(globalTotals.real, globalTotals.refTotal), [globalTotals]);
 
   const globalRealVSPpto = useMemo(() => getPercent(globalTotals.real, globalTotals.presupuesto), [globalTotals]);
 
   const globalProyVSPpto = useMemo(() => getPercent(globalTotals.proyeccion, globalTotals.presupuesto), [globalTotals]);
 
-  const globalProyVSRef = useMemo(() => getPercent(globalTotals.proyeccion, globalTotals.ref2025), [globalTotals]);
+  const globalProyVSRef = useMemo(() => getPercent(globalTotals.proyeccion, globalTotals.refTotal), [globalTotals]);
 
   const effectiveMode = reportMode === 'auto' ? (globalTotals.real > 0 ? 'cierre' : 'proyeccion') : reportMode;
 
@@ -452,21 +475,37 @@ const ClientReportDashboard: React.FC = () => {
   const handleUpdate = async (formData: any) => {
     setSaving(true);
     try {
+      const { data: currentData } = await supabase
+        .from('proyecciones_estrategicas')
+        .select('referencias_anuales')
+        .eq('id', selectedItem?.id)
+        .single();
+
+      const currentRefs = currentData?.referencias_anuales || {};
+      
+      const updatedRefs = {
+        ...currentRefs,
+        [referenceYear]: {
+            ng: formData.referenciaNg,
+            ss: formData.referenciaSs
+        }
+      };
+
       const { error } = await supabase
         .from('proyecciones_estrategicas')
         .update({
-          venta_2025_referencia: formData.ventaNg2025,
+          referencias_anuales: updatedRefs,
           presupuesto_monetario: formData.presupuesto,
           proyeccion_cajas: formData.proyeccionCajas
         })
         .eq('id', selectedItem?.id);
 
       if (error) throw error;
-      addNotification({ type: 'success', title: 'Cambios Guardados', message: 'La base estratégica ha sido actualizada.' });
+      addNotification({ type: 'success', title: 'Cambios Guardados', message: `Base estratégica ${referenceYear} actualizada.` });
       fetchData();
       setIsEditModalOpen(false);
-    } catch (e) {
-      addNotification({ type: 'danger', title: 'Error de Guardado', message: 'No se pudo actualizar el registro.' });
+    } catch (e: any) {
+      addNotification({ type: 'danger', title: 'Error de Guardado', message: e.message || 'No se pudo actualizar el registro.' });
     } finally {
       setSaving(false);
     }
@@ -527,7 +566,7 @@ const ClientReportDashboard: React.FC = () => {
                   <span className="text-xl font-black" style={{ color: getComplianceColor(globalPercentage) }}>{globalPercentage}%</span>
                 </div>
                 <div className="text-right">
-                  <span className="block text-[8px] font-black text-text-muted uppercase tracking-widest">Global Real vs 2025</span>
+                  <span className="block text-[8px] font-black text-text-muted uppercase tracking-widest">Global Real vs {referenceYear}</span>
                   <span className="text-xl font-black" style={{ color: getComplianceColor(globalRealVSRef) }}>{globalRealVSRef}%</span>
                 </div>
                 <div className="text-right">
@@ -538,7 +577,7 @@ const ClientReportDashboard: React.FC = () => {
             ) : (
               <>
                 <div className="text-right">
-                  <span className="block text-[8px] font-black text-text-muted uppercase tracking-widest">Alcance Venta (Proy vs 2025)</span>
+                  <span className="block text-[8px] font-black text-text-muted uppercase tracking-widest">Alcance Total ({referenceYear})</span>
                   <span className="text-xl font-black" style={{ color: globalProyVSRef >= 100 ? '#16A34A' : '#DC2626' }}>{globalProyVSRef}%</span>
                 </div>
                 <div className="text-right">
@@ -571,6 +610,23 @@ const ClientReportDashboard: React.FC = () => {
       </div>
 
       <div className="flex flex-wrap items-center gap-4 bg-white p-4 rounded-2xl border border-border mt-2 shadow-sm">
+          <div className="flex items-center gap-4 pr-4 border-r border-border">
+              <div className="flex items-center gap-2">
+                  <CalendarIcon className="w-4 h-4 text-primary" />
+                  <label className="text-[9px] font-black text-text-muted uppercase">Año Base (Ref)</label>
+                  <select 
+                      value={referenceYear} 
+                      onChange={(e) => setReferenceYear(Number(e.target.value))}
+                      className="bg-white border border-border rounded-lg py-1 px-2 text-xs font-black text-primary outline-none"
+                  >
+                      <option value={2025}>2025</option>
+                      <option value={2026}>2026</option>
+                      <option value={2027}>2027</option>
+                      <option value={2028}>2028</option>
+                  </select>
+              </div>
+          </div>
+
           <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-xl">
               <button 
                 onClick={() => setUseDateRange(false)}
@@ -642,7 +698,8 @@ const ClientReportDashboard: React.FC = () => {
               <thead>
                 <tr className="bg-[#002D62] text-white text-[10px] uppercase font-black tracking-widest">
                   <th className="px-6 py-3">Categoría / Producto</th>
-                  <th className="px-4 py-3 text-center">Referencia 2025</th>
+                  <th className="px-4 py-3 text-center">NG {referenceYear}</th>
+                  <th className="px-4 py-3 text-center">SS {referenceYear}</th>
                   <th className="px-4 py-3 text-center">Presupuesto</th>
                   <th className="px-4 py-3 text-center">Proyección</th>
                   {effectiveMode === 'cierre' ? (
@@ -653,7 +710,7 @@ const ClientReportDashboard: React.FC = () => {
                   ) : (
                     <>
                       <th className="px-4 py-3 text-center">Alc. Ppto</th>
-                      <th className="px-4 py-3 text-center">Alc. Venta (Critico)</th>
+                      <th className="px-4 py-3 text-center">Alc. Total (NG+SS)</th>
                     </>
                   )}
                   {canEdit && <th className="px-4 py-3 text-center bg-accent/20">Control</th>}
@@ -664,7 +721,8 @@ const ClientReportDashboard: React.FC = () => {
                   <React.Fragment key={cat}>
                     <tr className="bg-[#001F44] text-white font-black text-[10px] uppercase shadow-sm">
                       <td className="px-6 py-2.5">{cat}</td>
-                      <td className="px-4 py-2.5 text-center">{items.reduce((acc, curr) => acc + curr.ventaNg2025, 0).toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-center">{items.reduce((acc, curr) => acc + curr.referenciaNg, 0).toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-center">{items.reduce((acc, curr) => acc + curr.referenciaSs, 0).toLocaleString()}</td>
                       <td className="px-4 py-2.5 text-center">{items.reduce((acc, curr) => acc + curr.presupuesto, 0).toLocaleString()}</td>
                       <td className="px-4 py-2.5 text-center">{items.reduce((acc, curr) => acc + curr.proyeccionCajas, 0).toLocaleString()}</td>
                       {effectiveMode === 'cierre' ? (
@@ -675,7 +733,7 @@ const ClientReportDashboard: React.FC = () => {
                       ) : (
                         <>
                           <td className="px-4 py-2.5">{renderPercent(items.reduce((acc, curr) => acc + curr.proyeccionCajas, 0), items.reduce((acc, curr) => acc + curr.presupuesto, 0))}</td>
-                          <td className="px-4 py-2.5">{renderPercent(items.reduce((acc, curr) => acc + curr.proyeccionCajas, 0), items.reduce((acc, curr) => acc + curr.ventaNg2025, 0), true)}</td>
+                          <td className="px-4 py-2.5">{renderPercent(items.reduce((acc, curr) => acc + curr.proyeccionCajas, 0), items.reduce((acc, curr) => acc + curr.referenciaNg + curr.referenciaSs, 0), true)}</td>
                         </>
                       )}
                       {canEdit && <td className="bg-accent/5"></td>}
@@ -683,7 +741,8 @@ const ClientReportDashboard: React.FC = () => {
                     {items.map(item => (
                       <tr key={item.id} className="hover:bg-hover transition-colors text-[10px] font-bold">
                         <td className="px-10 py-1.5 text-text-primary border-l-4 border-l-primary/10">{item.nombreDelProducto}</td>
-                        <td className="px-4 py-1.5 text-center text-text-muted">{item.ventaNg2025.toLocaleString()}</td>
+                        <td className="px-4 py-1.5 text-center text-text-muted">{item.referenciaNg.toLocaleString()}</td>
+                        <td className="px-4 py-1.5 text-center text-text-muted">{item.referenciaSs.toLocaleString()}</td>
                         <td className="px-4 py-1.5 text-center text-text-muted">{item.presupuesto.toLocaleString()}</td>
                         <td className="px-4 py-1.5 text-center">{item.proyeccionCajas.toLocaleString()}</td>
                         {effectiveMode === 'cierre' ? (
@@ -694,7 +753,7 @@ const ClientReportDashboard: React.FC = () => {
                         ) : (
                           <>
                             <td className="px-4 py-1.5">{renderPercent(item.proyeccionCajas, item.presupuesto)}</td>
-                            <td className="px-4 py-1.5">{renderPercent(item.proyeccionCajas, item.ventaNg2025, true)}</td>
+                            <td className="px-4 py-1.5">{renderPercent(item.proyeccionCajas, item.referenciaNg + item.referenciaSs, true)}</td>
                           </>
                         )}
                         {canEdit && (
@@ -711,7 +770,8 @@ const ClientReportDashboard: React.FC = () => {
 	                ))}
 	                <tr className="bg-[#000F24] text-white text-[10px] font-black uppercase tracking-wide">
 	                  <td className="px-6 py-3">Total General</td>
-	                  <td className="px-4 py-3 text-center">{globalTotals.ref2025.toLocaleString()}</td>
+	                  <td className="px-4 py-3 text-center">{globalTotals.refNg.toLocaleString()}</td>
+	                  <td className="px-4 py-3 text-center">{globalTotals.refSs.toLocaleString()}</td>
 	                  <td className="px-4 py-3 text-center">{globalTotals.presupuesto.toLocaleString()}</td>
 	                  <td className="px-4 py-3 text-center">{globalTotals.proyeccion.toLocaleString()}</td>
 	                  {effectiveMode === 'cierre' ? (
@@ -722,7 +782,7 @@ const ClientReportDashboard: React.FC = () => {
 	                  ) : (
 	                    <>
 	                      <td className="px-4 py-3">{renderPercent(globalTotals.proyeccion, globalTotals.presupuesto)}</td>
-	                      <td className="px-4 py-3">{renderPercent(globalTotals.proyeccion, globalTotals.ref2025, true)}</td>
+	                      <td className="px-4 py-3">{renderPercent(globalTotals.proyeccion, globalTotals.refTotal, true)}</td>
 	                    </>
 	                  )}
 	                  {canEdit && <td className="bg-white/5"></td>}
@@ -871,6 +931,7 @@ const ClientReportDashboard: React.FC = () => {
       {isEditModalOpen && selectedItem && (
         <QuickEditModal
           item={selectedItem}
+          year={referenceYear}
           onClose={() => setIsEditModalOpen(false)}
           onSave={handleUpdate}
           saving={saving}
@@ -888,7 +949,7 @@ const ClientReportDashboard: React.FC = () => {
   );
 };
 
-const QuickEditModal = ({ item, onClose, onSave, saving }: any) => {
+const QuickEditModal = ({ item, year, onClose, onSave, saving }: any) => {
   const [form, setForm] = useState({ ...item });
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/80 z-[250] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
@@ -899,9 +960,15 @@ const QuickEditModal = ({ item, onClose, onSave, saving }: any) => {
         </div>
         <div className="p-6 space-y-4">
           <p className="text-[10px] font-black text-primary uppercase border-b pb-2">{item.nombreDelProducto}</p>
-          <div>
-            <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Referencia 2025 (Cajas)</label>
-            <input type="number" className="w-full bg-background border p-2 rounded-lg font-bold outline-none" value={form.ventaNg2025} onChange={e => setForm({ ...form, ventaNg2025: parseInt(e.target.value) || 0 })} />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Ref NG {year}</label>
+              <input type="number" className="w-full bg-background border p-2 rounded-lg font-bold outline-none" value={form.referenciaNg} onChange={e => setForm({ ...form, referenciaNg: parseInt(e.target.value) || 0 })} />
+            </div>
+            <div>
+              <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Ref SS {year}</label>
+              <input type="number" className="w-full bg-background border p-2 rounded-lg font-bold outline-none" value={form.referenciaSs} onChange={e => setForm({ ...form, referenciaSs: parseInt(e.target.value) || 0 })} />
+            </div>
           </div>
           <div>
             <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Presupuesto Cajas</label>
