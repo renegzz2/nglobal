@@ -47,6 +47,7 @@ interface TransportUnit {
 
 interface AuditProduct extends ProductQuantity {
     id: string;
+    sourceLotId?: string;
 }
 
 interface UsaShipmentFormProps {
@@ -173,14 +174,12 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         stopOverProjectId: '',
         sucursalId: '',
         clientId: '',
-        isConsolidated: false,
+        lotesAsociados: [] as string[],
         products: [] as AuditProduct[],
         departureDateTime: '',
         realDepartureDate: '',
         arrivalDateTime: '',
         temperatureIdeal: null as number | string | null,
-        loteOriginalId: null as string | null,
-        loteSecundarioId: null as string | null,
         secondaryStatus: '' as string 
     });
 
@@ -198,9 +197,19 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     useEffect(() => {
         const fetchResources = async () => {
             setLoadingResources(true);
+            
+            let initialLotes: string[] = [];
+            if (initialData?.lotesAsociados && Array.isArray(initialData.lotesAsociados)) {
+                initialLotes = initialData.lotesAsociados;
+            } else {
+                if (initialData?.loteOriginalId) initialLotes.push(initialData.loteOriginalId);
+                if (initialData?.loteSecundarioId) initialLotes.push(initialData.loteSecundarioId);
+            }
+
             const lotsQuery = supabase.from('lider_programacion_usa_reports').select('*');
-            if (initialData?.loteOriginalId) {
-                lotsQuery.or(`usa_logistics_status.eq.Programado,id.eq.${initialData.loteOriginalId}`);
+            if (initialLotes.length > 0) {
+                const inFilter = `(${initialLotes.join(',')})`;
+                lotsQuery.or(`usa_logistics_status.eq.Programado,id.in.${inFilter}`);
             } else {
                 lotsQuery.eq('usa_logistics_status', 'Programado');
             }
@@ -216,11 +225,20 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             setLoadingResources(false);
         };
         if (isOpen) fetchResources();
-    }, [isOpen]);
+    }, [isOpen, initialData]);
 
     useEffect(() => {
         if (initialData) {
             const initialProjectId = initialData.projectId || (initialData.project ? MANUAL_PROJECT_OPTION : '');
+            
+            let initialLotes: string[] = [];
+            if (initialData.lotesAsociados && Array.isArray(initialData.lotesAsociados)) {
+                initialLotes = initialData.lotesAsociados;
+            } else {
+                if (initialData.loteOriginalId) initialLotes.push(initialData.loteOriginalId);
+                if (initialData.loteSecundarioId) initialLotes.push(initialData.loteSecundarioId);
+            }
+
             setBaseData({
                 tripId: initialData.tripId,
                 project: initialData.project,
@@ -228,7 +246,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 stopOverProjectId: initialData.stopOverProjectId || '',
                 sucursalId: initialData.sucursalId || '',
                 clientId: initialData.clientId || '',
-                isConsolidated: initialData.isConsolidated,
+                lotesAsociados: initialLotes,
                 products: (initialData.products || []).map(p => ({
                     ...p,
                     id: Math.random().toString(),
@@ -238,14 +256,13 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                     realQty: p.realQty || p.quantity,
                     invoiceNumber: p.invoiceNumber || '',
                     invoiceUrl: p.invoiceUrl || '',
-                    mid: p.mid || ''
+                    mid: p.mid || '',
+                    sourceLotId: p.sourceLotId || p.source_lot_id || null
                 })) as AuditProduct[],
                 departureDateTime: toInputDateTime(initialData.departureDateTime),
                 realDepartureDate: toInputDateTime(initialData.realDepartureDate),
                 arrivalDateTime: toInputDateTime(initialData.arrivalDateTime),
                 temperatureIdeal: initialData.idealTemp || initialData.temperature || null,
-                loteOriginalId: initialData.loteOriginalId || null,
-                loteSecundarioId: initialData.loteSecundarioId || null,
                 secondaryStatus: initialData.comments?.includes('[HOLD]') ? 'Hold' : ''
             });
             
@@ -277,12 +294,12 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         }
     }, [initialData]);
 
-    const handleSelectPrimaryLot = (loteId: string) => {
-        if (!loteId) return;
+    const handleAddLot = (loteId: string) => {
+        if (!loteId || baseData.lotesAsociados.includes(loteId)) return;
         const lote = pendingLots.find(l => l.id === loteId);
         if (!lote) return;
 
-        const e1Products = (lote.productos || []).map((p: any) => ({
+        const newProducts = (lote.productos || []).map((p: any) => ({
             ...p,
             id: Math.random().toString(),
             productId: p.productId || p.product_id || (p.manualProductName || p.manual_product_name ? MANUAL_PRODUCT_OPTION : ''),
@@ -290,67 +307,44 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             projectedQty: p.quantity || p.cantidad || 0,
             realQty: p.quantity || p.cantidad || 0,
             invoiceNumber: '',
-            invoiceUrl: ''
+            invoiceUrl: '',
+            sourceLotId: lote.id 
         })) as AuditProduct[];
+
+        const newLotes = [...baseData.lotesAsociados, lote.id];
+        const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
+        const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
 
         setBaseData(prev => ({
             ...prev,
-            project: lote.proyecto as string,
-            projectId: lote.projectId || (lote.proyecto ? MANUAL_PROJECT_OPTION : ''),
-            loteOriginalId: lote.id,
-            products: e1Products,
-            departureDateTime: toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`),
-            temperatureIdeal: lote.temperaturaIdeal || null,
+            lotesAsociados: newLotes,
+            project: newProjectName,
+            products: [...prev.products, ...newProducts],
+            departureDateTime: prev.lotesAsociados.length === 0 ? toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`) : prev.departureDateTime,
+            temperatureIdeal: prev.lotesAsociados.length === 0 ? (lote.temperaturaIdeal || null) : prev.temperatureIdeal,
         }));
 
-        const totalSum = e1Products.reduce((acc, p) => acc + Number(p.realQty), 0);
-        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(totalSum) })));
-        addNotification({ type: 'success', title: 'Lote Vinculado', message: `Carga de ${lote.proyecto} cargada al formulario.` });
-    };
-
-    const handleAddConsolidation = (loteId: string) => {
-        if (!loteId) return;
-        const lote = pendingLots.find(l => l.id === loteId);
-        if (!lote) return;
-
-        const e2Products = (lote.productos || []).map((p: any) => ({
-            ...p,
-            id: Math.random().toString(),
-            productId: p.productId || p.product_id || (p.manualProductName || p.manual_product_name ? MANUAL_PRODUCT_OPTION : ''),
-            manualProductName: p.manualProductName || p.manual_product_name || '',
-            projectedQty: p.quantity || p.cantidad || 0,
-            realQty: p.quantity || p.cantidad || 0,
-            invoiceNumber: '',
-            invoiceUrl: ''
-        })) as AuditProduct[];
-
-        setBaseData(prev => ({
-            ...prev,
-            isConsolidated: true,
-            stopOverProjectId: lote.projectId || '',
-            loteSecundarioId: lote.id,
-            project: prev.project.includes(' / ') ? prev.project : `${prev.project} / ${lote.proyecto}`,
-            products: [...prev.products, ...e2Products]
-        }));
-
-        const newTotal = [...baseData.products, ...e2Products].reduce((acc, p) => acc + Number(p.realQty), 0);
+        const newTotal = [...baseData.products, ...newProducts].reduce((acc, p) => acc + Number(p.realQty), 0);
         setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
-        addNotification({ type: 'info', title: 'Remolque Virtual', message: `Fusión de carga: ${lote.proyecto}` });
+        addNotification({ type: 'success', title: 'Lote Añadido', message: `Carga de ${lote.proyecto} integrada al viaje.` });
     };
 
-    const handleClearLot = () => {
+    const handleRemoveLot = (loteId: string) => {
+        const newLotes = baseData.lotesAsociados.filter(id => id !== loteId);
+        const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
+        const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
+        const newProducts = baseData.products.filter(p => p.sourceLotId !== loteId);
+
         setBaseData(prev => ({
             ...prev,
-            loteOriginalId: null,
-            loteSecundarioId: null,
-            stopOverProjectId: '',
-            projectId: '',
-            products: [],
-            project: '',
-            isConsolidated: false
+            lotesAsociados: newLotes,
+            project: newProjectName,
+            products: newProducts
         }));
-        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: '0' })));
-        addNotification({ type: 'warning', title: 'Lote Desvinculado', message: 'Se han removido los productos asociados.' });
+
+        const newTotal = newProducts.reduce((acc, p) => acc + Number(p.realQty), 0);
+        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
+        addNotification({ type: 'warning', title: 'Lote Removido', message: 'Se ha desvinculado la carga y sus productos correspondientes.' });
     };
 
     const handleUnitChange = (id: string, field: keyof TransportUnit, value: any) => {
@@ -462,7 +456,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             clientId: baseData.clientId,
             lineaTransportistaId: u.lineaId || null,
             unidadTransporteId: u.unidadId || null,
-            isConsolidated: baseData.isConsolidated,
+            isConsolidated: baseData.lotesAsociados.length > 1,
+            lotesAsociados: baseData.lotesAsociados,
             products: baseData.products.map(({ id, ...p }) => ({
                 ...p,
                 productId: p.productId === MANUAL_PRODUCT_OPTION ? '' : p.productId,
@@ -484,8 +479,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             caat: u.caat, alpha: u.alpha, transferAgent: u.transferAgent, transferPhone: u.transferPhone, freightCost: parseFloat(u.freightCost) || null,
             realDepartureDate: baseData.realDepartureDate ? new Date(baseData.realDepartureDate).toISOString() : null,
             arrivalDateTime: baseData.arrivalDateTime ? new Date(baseData.arrivalDateTime).toISOString() : null,
-            loteOriginalId: baseData.loteOriginalId,
-            loteSecundarioId: baseData.loteSecundarioId,
             comments: (() => {
                 let comm = initialData?.comments || '';
                 comm = comm.replace(/\[HOLD\]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
@@ -518,7 +511,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                             <h3 className="text-2xl font-black text-primary uppercase tracking-tight">Gestión de Despacho Internacional</h3>
                             <div className="flex items-center gap-2 mt-1">
                                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                                <p className="text-text-muted text-[10px] font-bold uppercase tracking-[0.1em]">Configuración de Activos y Remolque Virtual</p>
+                                <p className="text-text-muted text-[10px] font-bold uppercase tracking-[0.1em]">Configuración de Activos y Consolidación Dinámica</p>
                             </div>
                         </div>
                     </div>
@@ -546,83 +539,60 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <label className={labelClasses}>Lote Maestro (Agenda)</label>
-                                        <div className="flex gap-2">
-                                            <select
-                                                className={`${inputClasses} flex-1`}
-                                                onChange={(e) => handleSelectPrimaryLot(e.target.value)}
-                                                value={baseData.loteOriginalId || ''}
-                                            >
-                                                <option value="">{baseData.loteOriginalId ? 'Cambiar lote vinculado...' : 'Seleccionar lote programado...'}</option>
-                                                {pendingLots.map(l => (
-                                                    <option key={l.id} value={l.id}>{l.loteId} — {l.proyecto}</option>
-                                                ))}
-                                            </select>
-                                            {baseData.loteOriginalId && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleClearLot}
-                                                    className="p-2.5 bg-danger/10 text-danger rounded-xl hover:bg-danger/20 transition-all border border-danger/20"
-                                                    title="Desvincular Lote"
-                                                >
-                                                    <TrashIcon className="w-5 h-5" />
-                                                </button>
-                                            )}
+                                    <div className="bg-accent/[0.03] p-5 rounded-2xl border border-dashed border-accent/20">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <SwitchHorizontalIcon className="w-4 h-4 text-accent" />
+                                            <span className="text-[10px] font-black text-accent uppercase tracking-wider">Añadir Lotes Programados</span>
                                         </div>
+                                        <select
+                                            className="w-full bg-white border border-accent/20 rounded-xl px-4 py-2 text-xs font-bold text-primary outline-none focus:ring-4 focus:ring-accent/5 transition-all"
+                                            onChange={(e) => { handleAddLot(e.target.value); e.target.value = ''; }}
+                                            value=""
+                                        >
+                                            <option value="" disabled>+ Seleccionar lote para integrar al viaje...</option>
+                                            {pendingLots.filter(l => !baseData.lotesAsociados.includes(l.id)).map(l => (
+                                                <option key={l.id} value={l.id}>{l.loteId} — {l.proyecto}</option>
+                                            ))}
+                                        </select>
+
+                                        {baseData.lotesAsociados.length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mt-4">
+                                                {baseData.lotesAsociados.map(loteId => {
+                                                    const lote = pendingLots.find(l => l.id === loteId) || { loteId: 'Desconocido', proyecto: 'Histórico' };
+                                                    return (
+                                                        <div key={loteId} className="flex items-center gap-2 bg-primary/10 border border-primary/20 text-primary px-3 py-1.5 rounded-xl shadow-sm">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest">{lote.loteId}</span>
+                                                            <span className="text-[10px] font-bold opacity-80">{lote.proyecto}</span>
+                                                            <button 
+                                                                type="button" 
+                                                                onClick={() => handleRemoveLot(loteId)} 
+                                                                className="ml-1 p-0.5 hover:bg-primary/20 hover:text-danger rounded-full transition-colors"
+                                                                title="Remover lote y sus productos"
+                                                            >
+                                                                <XIcon className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                            <label className={labelClasses}>Sede de Origen</label>
-                                            <select
-                                                value={baseData.projectId}
-                                                onChange={(e) => {
-                                                    if (e.target.value === MANUAL_PROJECT_OPTION) {
-                                                        setBaseData({ ...baseData, projectId: MANUAL_PROJECT_OPTION, project: baseData.project || '' });
-                                                        return;
-                                                    }
-                                                    const selectedProject = proyectos.find(p => p.id === e.target.value);
-                                                    setBaseData({ ...baseData, projectId: e.target.value, project: selectedProject?.nombre || '' });
-                                                }}
+                                            <label className={labelClasses}>Sede de Origen / Proyecto</label>
+                                            <input
+                                                type="text"
+                                                value={baseData.project}
+                                                onChange={(e) => setBaseData({ ...baseData, project: e.target.value.toUpperCase(), projectId: MANUAL_PROJECT_OPTION })}
                                                 className={inputClasses}
+                                                placeholder="Nombre consolidado del proyecto"
                                                 required
-                                            >
-                                                <option value="">Seleccionar...</option>
-                                                <option value={MANUAL_PROJECT_OPTION}>+ Proyecto no registrado</option>
-                                                {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                                            </select>
-                                            {baseData.projectId === MANUAL_PROJECT_OPTION && (
-                                                <input
-                                                    type="text"
-                                                    value={baseData.project}
-                                                    onChange={(e) => setBaseData({ ...baseData, project: e.target.value.toUpperCase() })}
-                                                    className={inputClasses}
-                                                    placeholder="Nombre del proyecto manual"
-                                                    required
-                                                />
-                                            )}
+                                            />
                                         </div>
                                         <div><label className={labelClasses}>Consignatario *</label><select value={baseData.clientId} onChange={(e) => setBaseData({ ...baseData, clientId: e.target.value })} className={inputClasses}><option value="">Seleccionar...</option>{clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div>
                                     </div>
 
-                                    <div className="bg-accent/[0.03] p-5 rounded-2xl border border-dashed border-accent/20">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <SwitchHorizontalIcon className="w-4 h-4 text-accent" />
-                                            <span className="text-[10px] font-black text-accent uppercase tracking-wider">Consolidación de Carga (E2)</span>
-                                        </div>
-                                        <select
-                                            className="w-full bg-white border border-accent/20 rounded-xl px-4 py-2 text-xs font-bold text-primary outline-none focus:ring-4 focus:ring-accent/5 transition-all"
-                                            onChange={(e) => handleAddConsolidation(e.target.value)}
-                                            value={baseData.loteSecundarioId || ''}
-                                            disabled={!baseData.loteOriginalId}
-                                        >
-                                            <option value="">Añadir carga secundaria...</option>
-                                            {pendingLots.filter(l => l.id !== baseData.loteOriginalId).map(l => (
-                                                <option key={l.id} value={l.id}>{l.loteId} — {l.proyecto}</option>
-                                            ))}
-                                        </select>
-                                    </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className={labelClasses}>Salida Real</label>

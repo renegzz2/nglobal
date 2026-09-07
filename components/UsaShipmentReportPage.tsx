@@ -158,7 +158,6 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                 return query;
             }));
 
-            // Check for errors in each table
             for (let i = 0; i < results.length; i++) {
                 if (results[i].error) {
                     console.error(`Error en tabla ${tables[i].name}:`, results[i].error);
@@ -210,10 +209,6 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         } catch (e) { return false; }
     };
 
-    const onDutyResponsables = useMemo(() => {
-        return responsables.filter(r => isCurrentlyOnDuty(r.horarioAtencion));
-    }, [responsables, currentTime]);
-
     const handleOpenForm = (report: UsaShipmentReport | null = null) => {
         setSelectedReportId(report ? report.id : null);
         setIsFormOpen(true);
@@ -231,9 +226,9 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         try {
             const items = Array.isArray(reportData) ? reportData : [reportData];
             for (const item of items) {
-                const { id, createdAt, loteOriginalId, loteSecundarioId, ...data } = item as any;
+                const { id, createdAt, loteOriginalId, loteSecundarioId, lotesAsociados, ...data } = item as any;
                 const finalStatus = status || data.logisticStatus || 'Confirmado';
-                const payload = { ...data, logisticStatus: finalStatus, loteOriginalId: loteOriginalId || null, loteSecundarioId: loteSecundarioId || null };
+                const payload = { ...data, logisticStatus: finalStatus, lotes_asociados: lotesAsociados || [] };
                 const dataToSave = toSnakeCase(payload);
 
                 if (id && String(id).length > 15) {
@@ -242,11 +237,11 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                     await supabase.from('usa_shipment_reports').insert(dataToSave);
                 }
 
-                if (loteOriginalId) {
-                    await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Cargado' }).eq('id', loteOriginalId);
-                }
-                if (loteSecundarioId) {
-                    await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Cargado' }).eq('id', loteSecundarioId);
+                // Dinámico: Liberar todos los lotes asociados
+                if (lotesAsociados && lotesAsociados.length > 0) {
+                    await supabase.from('lider_programacion_usa_reports')
+                        .update({ usa_logistics_status: 'Cargado' })
+                        .in('id', lotesAsociados);
                 }
             }
             addNotification({ type: 'success', title: 'Viaje Registrado', message: `Folio oficial ${items[0].tripId} sincronizado.` });
@@ -265,12 +260,18 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             const { error } = await supabase.from('usa_shipment_reports').delete().eq('id', reportToDelete);
             if (error) throw error;
 
-            // JEFE: Si borramos el embarque, debemos regresar los lotes originales a 'Programado'
-            if (report?.loteOriginalId) {
-                await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Programado' }).eq('id', report.loteOriginalId);
+            // Identificar los lotes para liberarlos
+            let lotsToFree = report?.lotesAsociados || [];
+            if (!lotsToFree.length) {
+                // Respaldo de seguridad para registros antiguos
+                if (report?.loteOriginalId) lotsToFree.push(report.loteOriginalId);
+                if (report?.loteSecundarioId) lotsToFree.push(report.loteSecundarioId);
             }
-            if (report?.loteSecundarioId) {
-                await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Programado' }).eq('id', report.loteSecundarioId);
+
+            if (lotsToFree.length > 0) {
+                await supabase.from('lider_programacion_usa_reports')
+                    .update({ usa_logistics_status: 'Programado' })
+                    .in('id', lotsToFree);
             }
 
             setReports(prev => prev.filter(r => r.id !== reportToDelete));
@@ -289,13 +290,12 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         if (!reportToComplete) return;
         const report = reports.find(r => r.id === reportToComplete);
         
-        // JEFE: Usamos la fecha seleccionada manualmente por el usuario
         const finalArrivalDate = new Date(completionDate).toISOString();
 
         await supabase.from('usa_shipment_reports').update({
             logistic_status: 'Finalizado',
             arrival_date_time: finalArrivalDate,
-            rating_pending: true // JEFE: Marcamos para feedback obligatorio
+            rating_pending: true
         }).eq('id', reportToComplete);
 
         addNotification({ type: 'info', title: 'Viaje Concluido', message: 'Por favor califique el servicio de la línea.' });
@@ -328,10 +328,9 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         const status = logisticStatuses.find(s => s.nombre === report.logisticStatus);
         const color = status?.color || '#ddd';
 
-        // JEFE: Aplicamos un fondo sumamente tenue (aprox 5% de opacidad) para identificar la fila
         let backgroundColor = undefined;
         if (color && color.startsWith('#') && color.length === 7) {
-            backgroundColor = `${color}08`; // 08 es aprox 3% opacidad, muy tenue como pidió el usuario
+            backgroundColor = `${color}08`; 
         }
 
         return {
@@ -341,12 +340,10 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         };
     };
 
-    // JEFE: MOTOR DE REORDENACIÓN DE FILAS (SÓLO UI LOCAL PARA ESTA VERSIÓN)
     const handleReorder = (newData: UsaShipmentReport[]) => {
         setReports(newData);
     };
 
-    // JEFE: COLUMNAS CONFIGURADAS CON PRECISIÓN QUIRÚRGICA
     const columns: Column<any>[] = [
         {
             header: "ID VIAJE",
@@ -365,9 +362,9 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             header: "ORIGEN-DESTINO",
             accessor: (r) => (
                 <div className="flex items-center gap-2 text-[10px] font-bold">
-                    <span className="text-primary uppercase">{r.project || 'S/D'}</span>
+                    <span className="text-primary uppercase truncate max-w-[120px]" title={r.project}>{r.project || 'S/D'}</span>
                     <span className="text-text-muted">&rarr;</span>
-                    <span className="text-success uppercase">{clientes.find(c => c.id === r.clientId)?.nombre || 'S/D'}</span>
+                    <span className="text-success uppercase truncate max-w-[100px]">{clientes.find(c => c.id === r.clientId)?.nombre || 'S/D'}</span>
                 </div>
             )
         },
@@ -395,7 +392,7 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         {
             header: "PRODUCTO-VOLUMEN",
             accessor: (r) => {
-                const total = Number(r.totalRealBoxes || r.products?.reduce((acc: number, p: any) => acc + (Number(p.quantity || p.cantidad || 0)), 0) || 0);
+                const total = Number(r.totalRealBoxes || r.products?.reduce((acc: number, p: any) => acc + (Number(p.quantity || p.cantidad || p.realQty || 0)), 0) || 0);
                 const productNames = r.products?.map((p: any) => productSpecs.find(spec => spec.id === (p.productId || p.product_id))?.nombreDelProducto || p.manualProductName || p.manual_product_name).filter(Boolean).join(', ') || 'S/D';
                 return (
                     <div className="space-y-0.5">
