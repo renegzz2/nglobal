@@ -33,6 +33,7 @@ interface TransportUnit {
     temperature: string;
     totalRealBoxes: string;
     tiveTrackerId: string;
+    hasTiveTracker: boolean;
     palletsAsigned: number;
     logisticStatus: string;
     caat: string;
@@ -180,7 +181,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         temperatureIdeal: null as number | string | null,
         loteOriginalId: null as string | null,
         loteSecundarioId: null as string | null,
-        secondaryStatus: '' as string // JEFE: Estado secundario (ej: Hold)
+        secondaryStatus: '' as string 
     });
 
     const [lineas, setLineas] = useState<LineaTransporteDB[]>([]);
@@ -189,7 +190,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [loadingResources, setLoadingResources] = useState(false);
 
     const [units, setUnits] = useState<TransportUnit[]>([
-        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', temperature: '', totalRealBoxes: '', tiveTrackerId: '', palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', temperature: '', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
     ]);
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
@@ -247,6 +248,9 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 loteSecundarioId: initialData.loteSecundarioId || null,
                 secondaryStatus: initialData.comments?.includes('[HOLD]') ? 'Hold' : ''
             });
+            
+            const isUsingTripIdAsTive = initialData.tiveTrackerId === initialData.tripId;
+
             setUnits([{
                 id: initialData.id,
                 lineaId: initialData.lineaTransportistaId || '',
@@ -258,7 +262,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 sealNumber: initialData.sealNumber || '',
                 temperature: String(initialData.temperature || ''),
                 totalRealBoxes: String(initialData.totalRealBoxes || ''),
-                tiveTrackerId: initialData.tiveTrackerId || '',
+                tiveTrackerId: isUsingTripIdAsTive ? '' : (initialData.tiveTrackerId || ''),
+                hasTiveTracker: !isUsingTripIdAsTive,
                 palletsAsigned: 0,
                 logisticStatus: initialData.logisticStatus || 'Confirmado',
                 caat: initialData.caat || '',
@@ -348,7 +353,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         addNotification({ type: 'warning', title: 'Lote Desvinculado', message: 'Se han removido los productos asociados.' });
     };
 
-    const handleUnitChange = (id: string, field: keyof TransportUnit, value: string | number) => {
+    const handleUnitChange = (id: string, field: keyof TransportUnit, value: any) => {
         if (field === 'unidadId') {
             if (value === 'NEW') {
                 setActiveUnitIdForQuickAdd(id);
@@ -387,7 +392,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 const created = toCamelCase(data[0]) as UnidadTransporteDB;
                 setUnidades(prev => [...prev, created]);
                 
-                // JEFE: Auto-seleccionamos la unidad recién creada
                 if (activeUnitIdForQuickAdd) {
                     handleUnitChange(activeUnitIdForQuickAdd, 'unidadId', created.id);
                 }
@@ -443,7 +447,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             return;
         }
         if (baseData.projectId === MANUAL_PROJECT_OPTION && !baseData.project.trim()) {
-            addNotification({ type: 'danger', title: 'AtenciÃ³n', message: 'Debe capturar el nombre del proyecto manual.' });
+            addNotification({ type: 'danger', title: 'Atención', message: 'Debe capturar el nombre del proyecto manual.' });
             return;
         }
         const targetStatus = forcedStatus || units[0].logisticStatus || 'Confirmado';
@@ -476,7 +480,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             temperature: parseFloat(u.temperature) || null,
             totalRealBoxes: parseInt(u.totalRealBoxes) || null,
             idealTemp: baseData.temperatureIdeal,
-            tiveTrackerId: u.tiveTrackerId,
+            tiveTrackerId: u.hasTiveTracker ? (u.tiveTrackerId?.trim() ? u.tiveTrackerId.trim() : null) : baseData.tripId.trim(),
             caat: u.caat, alpha: u.alpha, transferAgent: u.transferAgent, transferPhone: u.transferPhone, freightCost: parseFloat(u.freightCost) || null,
             realDepartureDate: baseData.realDepartureDate ? new Date(baseData.realDepartureDate).toISOString() : null,
             arrivalDateTime: baseData.arrivalDateTime ? new Date(baseData.arrivalDateTime).toISOString() : null,
@@ -484,7 +488,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             loteSecundarioId: baseData.loteSecundarioId,
             comments: (() => {
                 let comm = initialData?.comments || '';
-                // Remove existing tags
                 comm = comm.replace(/\[HOLD\]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
                 let tags = '';
                 if (baseData.secondaryStatus === 'Hold') tags += '[HOLD] ';
@@ -812,7 +815,37 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                             <div><label className={labelClasses}>Nombre del Operador *</label><input type="text" value={unit.driverName} onChange={(e) => handleUnitChange(unit.id, 'driverName', e.target.value.toUpperCase())} className={inputClasses} placeholder="NOMBRE COMPLETO" /></div>
                                         </div>
                                         <div className="space-y-6">
-                                            <div><label className={labelClasses}>Identificador Tive (K-Number)</label><input type="text" value={unit.tiveTrackerId} onChange={(e) => handleUnitChange(unit.id, 'tiveTrackerId', e.target.value)} className={`${inputClasses} font-mono`} placeholder="K123456" /></div>
+                                            <div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <label className="block text-[10px] font-black text-text-muted uppercase tracking-widest">Identificador Tive</label>
+                                                    <div 
+                                                        className="flex items-center gap-2 cursor-pointer" 
+                                                        onClick={() => handleUnitChange(unit.id, 'hasTiveTracker', !unit.hasTiveTracker)}
+                                                        title="¿El embarque incluye un equipo físico de Tive?"
+                                                    >
+                                                        <span className={`text-[9px] font-black uppercase transition-colors ${unit.hasTiveTracker ? 'text-primary' : 'text-text-muted'}`}>
+                                                            {unit.hasTiveTracker ? 'SÍ (Físico)' : 'NO'}
+                                                        </span>
+                                                        <div className={`w-7 h-4 rounded-full relative transition-colors duration-200 ${unit.hasTiveTracker ? 'bg-primary' : 'bg-gray-300'}`}>
+                                                            <div className={`absolute top-[2px] w-3 h-3 rounded-full bg-white transition-all duration-200 ${unit.hasTiveTracker ? 'left-[14px]' : 'left-0.5'}`}></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {unit.hasTiveTracker ? (
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.tiveTrackerId} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'tiveTrackerId', e.target.value.toUpperCase())} 
+                                                        className={`${inputClasses} font-mono`} 
+                                                        placeholder="K123456" 
+                                                    />
+                                                ) : (
+                                                    <div className={`${inputClasses} bg-gray-50 text-text-muted font-mono flex items-center cursor-not-allowed opacity-80 border-dashed`}>
+                                                        {baseData.tripId || 'ESPERANDO FOLIO...'}
+                                                    </div>
+                                                )}
+                                            </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div><label className={labelClasses}>Set Point (°F)</label><input type="text" value={unit.temperature} onChange={(e) => handleUnitChange(unit.id, 'temperature', e.target.value)} className={inputClasses} placeholder="35.0" /></div>
                                                 <div><label className={labelClasses}>Total de Cajas</label><input type="number" value={unit.totalRealBoxes} onChange={(e) => handleUnitChange(unit.id, 'totalRealBoxes', e.target.value)} className={inputClasses} /></div>
