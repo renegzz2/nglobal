@@ -16,6 +16,8 @@ interface TiveData {
     etaLabel?: string;
     isDelayed?: boolean;
     noSignal?: boolean;
+    lat?: number;
+    lng?: number;
 }
 
 interface TiveMonitoringContextType {
@@ -181,7 +183,9 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                         predictedEta: predictedEta || undefined,
                         etaLabel,
                         isDelayed,
-                        noSignal: dataAgeMinutes > 40
+                        noSignal: dataAgeMinutes > 40,
+                        lat: latest.lat,
+                        lng: latest.lng
                     };
                 }
             }
