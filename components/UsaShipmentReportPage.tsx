@@ -10,7 +10,7 @@ import Badge from './ui/Badge';
 import DataTable, { Column } from './ui/DataTable';
 import ShipmentCardView from './ShipmentCardView';
 import StaffOnDuty from './StaffOnDuty';
-import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, BoxIcon, TruckIcon, SwitchHorizontalIcon, ExclamationIcon, DatabaseIcon, ClockIcon, UserIcon, PhoneIcon, LayoutGridIcon, TableIcon } from './icons';
+import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, BoxIcon, TruckIcon, SwitchHorizontalIcon, ExclamationIcon, DatabaseIcon, ClockIcon, UserIcon, PhoneIcon, LayoutGridIcon, TableIcon, MapPinIcon } from './icons';
 import { useNotification } from './NotificationProvider';
 import { useTiveMonitoring } from './TiveMonitoringProvider';
 import { formatCarrierName, toCamelCase, toSnakeCase } from '../utils/formatters';
@@ -436,6 +436,39 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                         )}
                     </div>
                 );
+            }
+        },
+        {
+            header: "UBICACIÓN / RUTA",
+            accessor: (r) => {
+                const live = latestTiveData[r.id];
+                const destClient = clientes.find(c => c.id === r.clientId);
+                // Usamos el nombre del consignatario como destino para que Google calcule la ruta
+                const destination = encodeURIComponent(`${destClient?.nombre || 'Destino'} USA`); 
+                
+                if (live?.lat && live?.lng) {
+                    const mapUrl = `https://www.google.com/maps/dir/?api=1&origin=${live.lat},${live.lng}&destination=${destination}`;
+                    return (
+                        <a 
+                            href={mapUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all w-max border border-blue-200 shadow-sm active:scale-95"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Abrir en Google Maps"
+                        >
+                            <MapPinIcon className="w-3.5 h-3.5" />
+                            Ruta GPS
+                        </a>
+                    );
+                } else {
+                    return (
+                        <div className="flex items-center gap-1.5 px-2 text-[9px] font-bold text-text-muted italic">
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
+                            Sin GPS
+                        </div>
+                    );
+                }
             }
         },
         {
