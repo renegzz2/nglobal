@@ -1,106 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-serve(async (req) => {
-  if (req.method === 'GET') {
-    const url = new URL(req.url);
-    return new Response(url.searchParams.get('hub.challenge'), { status: 200 });
-  }
-
-  try {
-    const payload = await req.json();
-    
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id;
-    // Forzamos minúsculas para que nunca falle por una letra mayúscula enviada por Tive
-    const alertType = (payload.alert?.type || 'NORMAL').toLowerCase();
-    const isAlert = !!payload.alert;
-
-    if (!trackerId) {
-        return new Response(JSON.stringify({ success: true, message: "Sin Tracker ID" }), { status: 200 });
-    }
-
-    // --- 1. BUSCAR VIAJE ACTIVO ---
-    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('id, trip_id, real_departure_date').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
-    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('id, trip_id, real_departure_date').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
-
-    let activeTrip = null;
-    let tripTableName = null;
-
-    if (activeUsa && activeUsa.length > 0) {
-        activeTrip = activeUsa[0];
-        tripTableName = 'usa_shipment_reports';
-    } else if (activeNac && activeNac.length > 0) {
-        activeTrip = activeNac[0];
-        tripTableName = 'nacional_shipment_reports';
-    }
-
-    if (!activeTrip) {
-        console.log(`🛑 IGNORADO: El rastreador ${trackerId} NO tiene viajes activos.`);
-        return new Response(JSON.stringify({ success: true }), { status: 200 });
-    }
-
-    // Variables de telemetría comunes
-    const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
-    const hum = payload.Humidity?.Percentage ?? null;
-    const lat = payload.Location?.Latitude ?? payload.location?.latitude ?? null;
-    const lng = payload.Location?.Longitude ?? payload.location?.longitude ?? null;
-    const locName = payload.Location?.FormattedAddress ?? payload.location?.address ?? 'Ubicación Desconocida';
-    const bat = payload.Battery?.Percentage ?? null;
-    const time = payload.EntryTimeUtc || new Date().toISOString();
-
-    // --- 2. EVALUAR INICIO DE VIAJE AUTOMÁTICO ---
-    let isFirstPing = false;
-    if (!activeTrip.real_departure_date && lat !== null) {
-        isFirstPing = true;
-        console.log(`🚀 INICIO DE VIAJE DETECTADO para folio ${activeTrip.trip_id}`);
-        await supabase.from(tripTableName).update({ 
-            real_departure_date: time, 
-            logistic_status: 'En Tránsito' 
-        }).eq('id', activeTrip.id);
-    }
-
-    // --- 3. GUARDAR TELEMETRÍA (Siempre) ---
-    if (tempF !== null || lat !== null) {
-        await supabase.from('tive_events').insert({
-            tracker_id: trackerId, temperature: tempF, humidity: hum, lat: lat, lng: lng, location: locName, battery: bat, timestamp: time, alert_type: alertType
-        });
-    }
-
-    // --- 4. DECIDIR SI REQUIERE WHATSAPP ---
-    // Agregamos la validación para paradas prolongadas (stop)
-    const isStopAlert = alertType.includes('stop');
-    const requiresNotification = isFirstPing || alertType === 'route_deviation' || alertType === 'temperature' || isStopAlert;
-
-    if (!requiresNotification) {
-        console.log("🔵 Telemetría guardada sin requerir notificación.");
-        return new Response(JSON.stringify({ success: true }), { status: 200 });
-    }
-
-    // --- 5. PREPARAR MENSAJE DE WHATSAPP ---
-    let motivoTexto = "Notificación de Sistema";
-    let detallesTexto = "Revisar plataforma.";
-
-    if (isFirstPing) {
-        motivoTexto = "🟢 INICIO DE VIAJE";
-        detallesTexto = `El sensor inició transmisión. El viaje cambió a 'En Tránsito' automáticamente.`;
-    } else if (alertType === 'temperature') {
-        motivoTexto = "🌡️ ALERTA: TEMPERATURA";
-        detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
-    } else if (alertType === 'route_deviation') {
-        motivoTexto = "📍 ALERTA: DESVÍO";
-        detallesTexto = `Posible desvío de ruta detectado. Mapa: https://maps.google.com/?q=${lat},${lng}`;
-    } else if (isStopAlert) {
-        motivoTexto = "⏱️ ALERTA: PARADA PROLONGADA";
-        detallesTexto = `El envío se detuvo más de 1 hora. Mapa: https://maps.google.com/?q=${lat},${lng}`;
-    }
-
-    console.log(`🚨 DISPARANDO WHATSAPP: ${motivoTexto}`);
-
-    // --- 6. ENVÍO DE WHATSAPP A PERSONAL EN TURNO ---
+// Función auxiliar para enviar el WhatsApp y evitar repetir código
+async function enviarWhatsApp(supabase: any, folioViaje: string, trackerId: string, motivoTexto: string, detallesTexto: string) {
     const { data: recipients } = await supabase.from('alert_recipients').select('*');
     const mxDate = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
     const diaActual = mxDate.getDay(); 
@@ -126,7 +28,6 @@ serve(async (req) => {
     if (phonesToNotify.length > 0) {
         const phoneId = Deno.env.get('phone_number_id_wpp');
         const accessToken = Deno.env.get('whatsapp_token_');
-        const folioViaje = activeTrip.trip_id || 'Sin Folio';
 
         const sendPromises = phonesToNotify.map(async phone => {
             const cleanPhone = phone.replace(/\D/g, ''); 
@@ -147,7 +48,118 @@ serve(async (req) => {
         });
         await Promise.all(sendPromises);
     }
+}
 
+serve(async (req) => {
+  if (req.method === 'GET') {
+    const url = new URL(req.url);
+    return new Response(url.searchParams.get('hub.challenge'), { status: 200 });
+  }
+
+  try {
+    const payload = await req.json();
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // =========================================================
+    // ESCENARIO 1: CAMBIO MANUAL DE ESTATUS EN TU PLATAFORMA (REACT)
+    // =========================================================
+    if (payload.type === 'UPDATE' && (payload.table === 'usa_shipment_reports' || payload.table === 'nacional_shipment_reports')) {
+        const oldStatus = payload.old_record?.logistic_status;
+        const newStatus = payload.record?.logistic_status;
+        
+        // Si actualizaron otra cosa pero el estatus logístico NO cambió, ignoramos.
+        if (!newStatus || oldStatus === newStatus) {
+            return new Response(JSON.stringify({ success: true, message: "Estatus sin cambios" }), { status: 200 });
+        }
+
+        const tripId = payload.record.trip_id;
+        const trackerId = payload.record.tive_tracker_id;
+        let lat = null;
+        let lng = null;
+
+        // Extraer la última coordenada guardada de ese camión
+        if (trackerId) {
+            const { data: lastLocation } = await supabase
+                .from('tive_events')
+                .select('lat, lng')
+                .eq('tracker_id', trackerId)
+                .not('lat', 'is', null)
+                .order('timestamp', { ascending: false })
+                .limit(1)
+                .single();
+            
+            if (lastLocation) {
+                lat = lastLocation.lat;
+                lng = lastLocation.lng;
+            }
+        }
+
+        const motivoTexto = `🟢 NUEVO ESTATUS: ${newStatus}`;
+        const detallesTexto = lat && lng 
+            ? `Estatus actualizado manualmente. Ubicación actual: https://maps.google.com/?q=${lat},${lng}`
+            : `Estatus actualizado manualmente. (Aún sin enlace satelital GPS).`;
+
+        await enviarWhatsApp(supabase, tripId || 'Sin Folio', trackerId || 'N/A', motivoTexto, detallesTexto);
+        return new Response(JSON.stringify({ success: true, message: "Alerta de estatus enviada" }), { status: 200 });
+    }
+
+    // =========================================================
+    // ESCENARIO 2: PING FÍSICO DESDE EL RASTREADOR TIVE
+    // =========================================================
+    const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id;
+    const alertType = (payload.alert?.type || 'NORMAL').toLowerCase();
+
+    if (!trackerId) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+
+    // Guardar Telemetría (Siempre)
+    const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
+    const hum = payload.Humidity?.Percentage ?? null;
+    const lat = payload.Location?.Latitude ?? payload.location?.latitude ?? null;
+    const lng = payload.Location?.Longitude ?? payload.location?.longitude ?? null;
+    const locName = payload.Location?.FormattedAddress ?? payload.location?.address ?? 'Ubicación Desconocida';
+    const bat = payload.Battery?.Percentage ?? null;
+    const time = payload.EntryTimeUtc || new Date().toISOString();
+
+    if (tempF !== null || lat !== null) {
+        await supabase.from('tive_events').insert({
+            tracker_id: trackerId, temperature: tempF, humidity: hum, lat: lat, lng: lng, location: locName, battery: bat, timestamp: time, alert_type: alertType
+        });
+    }
+
+    // Evaluamos SOLO emergencias (Temperatura, Desvío, Parada)
+    const isStopAlert = alertType.includes('stop');
+    const requiresNotification = alertType === 'route_deviation' || alertType === 'temperature' || isStopAlert;
+
+    if (!requiresNotification) {
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+
+    // Buscar viaje asociado para sacar el Folio
+    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
+    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
+    const activeTrip = (activeUsa && activeUsa.length > 0) ? activeUsa[0] : ((activeNac && activeNac.length > 0) ? activeNac[0] : null);
+
+    if (!activeTrip) return new Response(JSON.stringify({ success: true }), { status: 200 });
+
+    let motivoTexto = "Notificación de Sistema";
+    let detallesTexto = "Revisar plataforma.";
+
+    if (alertType === 'temperature') {
+        motivoTexto = "🌡️ ALERTA: TEMPERATURA";
+        detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
+    } else if (alertType === 'route_deviation') {
+        motivoTexto = "📍 ALERTA: DESVÍO";
+        detallesTexto = `Posible desvío de ruta detectado. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+    } else if (isStopAlert) {
+        motivoTexto = "⏱️ ALERTA: PARADA PROLONGADA";
+        detallesTexto = `El envío se detuvo más de 1 hora. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+    }
+
+    await enviarWhatsApp(supabase, activeTrip.trip_id, trackerId, motivoTexto, detallesTexto);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
 
   } catch (error) {
