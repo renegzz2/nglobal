@@ -62,9 +62,6 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // LOG DE REGISTRO PARA DEPURACIÓN
-    console.log("🔔 EVENTO RECIBIDO. Tipo:", payload.type || "Ping de Tive");
-
     // =========================================================
     // ESCENARIO 1: CREACIÓN DE VIAJE O CAMBIO MANUAL (REACT)
     // =========================================================
@@ -72,9 +69,7 @@ serve(async (req) => {
         const oldStatus = payload.old_record?.logistic_status;
         const newStatus = payload.record?.logistic_status;
         
-        // Si es un UPDATE y el estatus logístico no cambió, ignoramos.
         if (payload.type === 'UPDATE' && (!newStatus || oldStatus === newStatus)) {
-            console.log("⏭️ Estatus sin cambios. No se envía alerta.");
             return new Response(JSON.stringify({ success: true, message: "Estatus sin cambios" }), { status: 200 });
         }
 
@@ -83,7 +78,6 @@ serve(async (req) => {
         let lat = null;
         let lng = null;
 
-        // Extraer la última coordenada guardada de ese camión
         if (trackerId) {
             const { data: lastLocation } = await supabase
                 .from('tive_events')
@@ -109,20 +103,35 @@ serve(async (req) => {
             : `Actualizado desde plataforma. (Aún sin enlace satelital GPS).`;
 
         await enviarWhatsApp(supabase, tripId || 'Sin Folio', trackerId || 'N/A', motivoTexto, detallesTexto);
-        return new Response(JSON.stringify({ success: true, message: "Alerta enviada" }), { status: 200 });
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
     // =========================================================
     // ESCENARIO 2: PING FÍSICO DESDE EL RASTREADOR TIVE
     // =========================================================
     const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id;
-    const alertType = (payload.alert?.type || 'NORMAL').toLowerCase();
+    const rawAlertType = payload.alert?.type || payload.type || 'NORMAL';
+    const alertType = String(rawAlertType).toLowerCase();
 
     if (!trackerId) {
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
-    // Guardar Telemetría (Siempre)
+    // 1. VERIFICAR VIAJE ACTIVO
+    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
+    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
+    const activeTrip = (activeUsa && activeUsa.length > 0) ? activeUsa[0] : ((activeNac && activeNac.length > 0) ? activeNac[0] : null);
+
+    if (!activeTrip) {
+        return new Response(JSON.stringify({ success: true, message: "Ping ignorado (Sin viaje activo)" }), { status: 200 });
+    }
+
+    // 2. LOG DE ALERTA ESPECÍFICO (Para que siempre aparezca si buscas el trackerId)
+    if (alertType !== 'normal' && alertType !== 'ping') {
+        console.log(`⚠️ ALERTA INTERNA DE TIVE DETECTADA para ${trackerId}: ${alertType}`);
+    }
+
+    // 3. GUARDAR TELEMETRÍA
     const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
     const hum = payload.Humidity?.Percentage ?? null;
     const lat = payload.Location?.Latitude ?? payload.location?.latitude ?? null;
@@ -135,36 +144,32 @@ serve(async (req) => {
         await supabase.from('tive_events').insert({
             tracker_id: trackerId, temperature: tempF, humidity: hum, lat: lat, lng: lng, location: locName, battery: bat, timestamp: time, alert_type: alertType
         });
-        console.log(`📡 Datos guardados para ${trackerId}. Temp: ${tempF}, Lat/Lng: ${lat},${lng}`);
+        console.log(`📡 Datos guardados para ${trackerId} (Viaje: ${activeTrip.trip_id}). Temp: ${tempF}, Lat/Lng: ${lat},${lng}`);
     }
 
-    // Evaluamos SOLO emergencias configuradas explícitamente en Tive
+    // 4. EVALUAR EMERGENCIAS (BÚSQUEDA FLEXIBLE)
     const isStopAlert = alertType.includes('stop');
-    const requiresNotification = alertType === 'route_deviation' || alertType === 'temperature' || isStopAlert;
+    const isDeviation = alertType.includes('route') || alertType.includes('geofence') || alertType.includes('deviation');
+    const isTemp = alertType.includes('temperature') || alertType.includes('temp');
+
+    const requiresNotification = isDeviation || isTemp || isStopAlert;
 
     if (!requiresNotification) {
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
-    // Buscar viaje asociado para sacar el Folio
-    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
-    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').limit(1);
-    const activeTrip = (activeUsa && activeUsa.length > 0) ? activeUsa[0] : ((activeNac && activeNac.length > 0) ? activeNac[0] : null);
-
-    if (!activeTrip) return new Response(JSON.stringify({ success: true }), { status: 200 });
-
     let motivoTexto = "Notificación de Sistema";
     let detallesTexto = "Revisar plataforma.";
 
-    if (alertType === 'temperature') {
+    if (isTemp) {
         motivoTexto = "🌡️ ALERTA: TEMPERATURA";
         detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
-    } else if (alertType === 'route_deviation') {
+    } else if (isDeviation) {
         motivoTexto = "📍 ALERTA: DESVÍO";
-        detallesTexto = `Posible desvío de ruta detectado. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        detallesTexto = `Desviación de geocerca/ruta detectada. Mapa: https://maps.google.com/?q=${lat},${lng}`;
     } else if (isStopAlert) {
         motivoTexto = "⏱️ ALERTA: PARADA PROLONGADA";
-        detallesTexto = `El envío se detuvo más de 1 hora. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        detallesTexto = `El envío se detuvo más del tiempo permitido. Mapa: https://maps.google.com/?q=${lat},${lng}`;
     }
 
     await enviarWhatsApp(supabase, activeTrip.trip_id, trackerId, motivoTexto, detallesTexto);
