@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { UsaShipmentReport, ProductoDB, EstatusDB, ClienteDB, TipoUnidad, EscalaDB, ResponsableDB, ProyectoDB, LineaTransporteDB, ShipmentStatus, User, UserRole } from '../types';
 import UsaShipmentForm from './UsaShipmentForm';
@@ -20,6 +20,19 @@ interface UsaShipmentReportPageProps {
     initialView?: 'active' | 'completed';
     user: User;
 }
+
+const ALL_COLUMNS = [
+    "ID VIAJE", 
+    "LÍNEA", 
+    "ORIGEN-DESTINO", 
+    "Calendario (S/L)", 
+    "PRODUCTO-VOLUMEN", 
+    "TEMP REAL-OPTIMA", 
+    "COSTO FLETE (USD/MXN)", 
+    "UBICACIÓN / RUTA", 
+    "ESTATUS LOGISTICO", 
+    "ACCIONES"
+];
 
 const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialView = 'active', user }) => {
     const [reports, setReports] = useState<UsaShipmentReport[]>([]);
@@ -52,6 +65,43 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
     const [displayMode, setDisplayMode] = useState<'table' | 'cards'>('table');
 
     const [pendingLoads, setPendingLoads] = useState<Record<string, number>>({});
+    
+    // ESTADO Y LÓGICA PARA COLUMNAS DINÁMICAS
+    const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
+        const saved = localStorage.getItem('ng_usa_table_columns');
+        return saved ? JSON.parse(saved) : ALL_COLUMNS;
+    });
+    const [showColumnSelector, setShowColumnSelector] = useState(false);
+    const columnSelectorRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (columnSelectorRef.current && !columnSelectorRef.current.contains(event.target as Node)) {
+                setShowColumnSelector(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const toggleColumn = (colHeader: string) => {
+        setVisibleColumns(prev => {
+            const newCols = prev.includes(colHeader)
+                ? prev.filter(c => c !== colHeader)
+                : [...prev, colHeader];
+            
+            // Mantener siempre visible 'ACCIONES' por seguridad
+            if (colHeader === 'ACCIONES' && prev.includes('ACCIONES')) {
+                return prev; 
+            }
+
+            // Ordenar las columnas seleccionadas en el mismo orden que ALL_COLUMNS
+            const orderedCols = ALL_COLUMNS.filter(col => newCols.includes(col));
+            localStorage.setItem('ng_usa_table_columns', JSON.stringify(orderedCols));
+            return orderedCols;
+        });
+    };
+
     const ensureShipmentWriteAccess = () => {
         if (canManageShipments) return true;
         addNotification({
@@ -237,7 +287,6 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                     await supabase.from('usa_shipment_reports').insert(dataToSave);
                 }
 
-                // Dinámico: Liberar todos los lotes asociados
                 if (lotesAsociados && lotesAsociados.length > 0) {
                     await supabase.from('lider_programacion_usa_reports')
                         .update({ usa_logistics_status: 'Cargado' })
@@ -260,10 +309,8 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             const { error } = await supabase.from('usa_shipment_reports').delete().eq('id', reportToDelete);
             if (error) throw error;
 
-            // Identificar los lotes para liberarlos
             let lotsToFree = report?.lotesAsociados || [];
             if (!lotsToFree.length) {
-                // Respaldo de seguridad para registros antiguos
                 if (report?.loteOriginalId) lotsToFree.push(report.loteOriginalId);
                 if (report?.loteSecundarioId) lotsToFree.push(report.loteSecundarioId);
             }
@@ -344,7 +391,8 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         setReports(newData);
     };
 
-    const columns: Column<any>[] = [
+    // DEFINICIÓN MAESTRA DE COLUMNAS
+    const allColumnsConfig: Column<any>[] = [
         {
             header: "ID VIAJE",
             accessor: (r) => <span className="font-black text-primary uppercase">{r.tripId}</span>
@@ -443,7 +491,6 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             accessor: (r) => {
                 const live = latestTiveData[r.id];
                 const destClient = clientes.find(c => c.id === r.clientId);
-                // Usamos el nombre del consignatario como destino para que Google calcule la ruta
                 const destination = encodeURIComponent(`${destClient?.nombre || 'Destino'} USA`); 
                 
                 if (live?.lat && live?.lng) {
@@ -508,6 +555,11 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             )
         }
     ];
+
+    // Aplicar el filtro de columnas basado en las preferencias del usuario
+    const activeColumns = useMemo(() => {
+        return allColumnsConfig.filter(col => visibleColumns.includes(col.header as string));
+    }, [allColumnsConfig, visibleColumns]);
 
     return (
         <div className="animate-fade-in pb-12 space-y-8 h-full">
@@ -580,7 +632,7 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             </div>
 
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-surface p-4 rounded-2xl border border-border shadow-sm">
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
                     <div className="inline-flex bg-background p-1.5 rounded-xl border border-border">
                         <button
                             onClick={() => setView('active')}
@@ -602,16 +654,61 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                         <button
                             onClick={() => setDisplayMode('table')}
                             className={`p-2 rounded-lg transition-all ${displayMode === 'table' ? 'bg-white text-primary shadow-sm border border-border/50' : 'text-text-muted hover:text-primary'}`}
+                            title="Vista de Tabla"
                         >
                             <TableIcon className="w-5 h-5" />
                         </button>
                         <button
                             onClick={() => setDisplayMode('cards')}
                             className={`p-2 rounded-lg transition-all ${displayMode === 'cards' ? 'bg-white text-primary shadow-sm border border-border/50' : 'text-text-muted hover:text-primary'}`}
+                            title="Vista de Tarjetas"
                         >
                             <LayoutGridIcon className="w-5 h-5" />
                         </button>
                     </div>
+
+                    {/* SELECTOR DE COLUMNAS DINÁMICO */}
+                    {displayMode === 'table' && (
+                        <div className="relative" ref={columnSelectorRef}>
+                            <button
+                                onClick={() => setShowColumnSelector(!showColumnSelector)}
+                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider border transition-all ${showColumnSelector ? 'bg-primary/5 border-primary/30 text-primary shadow-inner' : 'bg-white border-border text-text-muted hover:text-primary hover:border-primary/30 shadow-sm'}`}
+                            >
+                                <LayoutGridIcon className="w-4 h-4" /> Columnas
+                            </button>
+                            
+                            {showColumnSelector && (
+                                <div className="absolute left-0 mt-2 w-56 bg-white border border-border rounded-2xl shadow-xl z-50 p-2 animate-fade-in origin-top-left">
+                                    <div className="px-3 py-2 text-[9px] font-black uppercase text-primary border-b border-border/50 mb-2 flex items-center gap-2">
+                                        <TableIcon className="w-3.5 h-3.5" /> Mostrar/Ocultar
+                                    </div>
+                                    <div className="max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                                        {ALL_COLUMNS.map(col => {
+                                            if (col === 'ACCIONES') return null; // Ocultamos 'ACCIONES' del menú para que no lo desactiven
+                                            return (
+                                                <label key={col} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors group">
+                                                    <div className="relative flex items-center justify-center w-4 h-4">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={visibleColumns.includes(col)}
+                                                            onChange={() => toggleColumn(col)}
+                                                            className="appearance-none w-4 h-4 border-2 border-gray-300 rounded cursor-pointer checked:bg-primary checked:border-primary transition-all peer"
+                                                        />
+                                                        <div className="pointer-events-none absolute text-white opacity-0 peer-checked:opacity-100 transition-opacity">
+                                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                        </div>
+                                                    </div>
+                                                    <span className={`text-[10px] font-black uppercase transition-colors ${visibleColumns.includes(col) ? 'text-primary' : 'text-text-muted group-hover:text-text-secondary'}`}>
+                                                        {col}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="relative w-full md:w-96 group">
@@ -632,7 +729,7 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                 {displayMode === 'table' ? (
                     <DataTable
                         data={filteredData}
-                        columns={columns}
+                        columns={activeColumns}
                         pageSize={25}
                         isLoading={loading}
                         onRowClick={handleOpenDetailsModal}
