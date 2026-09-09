@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-// Función auxiliar para enviar el WhatsApp y evitar repetir código
 async function enviarWhatsApp(supabase: any, folioViaje: string, trackerId: string, motivoTexto: string, detallesTexto: string) {
     const { data: recipients } = await supabase.from('alert_recipients').select('*');
     const mxDate = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
@@ -47,6 +46,7 @@ async function enviarWhatsApp(supabase: any, folioViaje: string, trackerId: stri
             });
         });
         await Promise.all(sendPromises);
+        console.log(`✅ WhatsApp enviado a ${phonesToNotify.length} destinatarios. Motivo: ${motivoTexto}`);
     }
 }
 
@@ -62,15 +62,19 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // LOG DE REGISTRO PARA DEPURACIÓN
+    console.log("🔔 EVENTO RECIBIDO. Tipo:", payload.type || "Ping de Tive");
+
     // =========================================================
-    // ESCENARIO 1: CAMBIO MANUAL DE ESTATUS EN TU PLATAFORMA (REACT)
+    // ESCENARIO 1: CREACIÓN DE VIAJE O CAMBIO MANUAL (REACT)
     // =========================================================
-    if (payload.type === 'UPDATE' && (payload.table === 'usa_shipment_reports' || payload.table === 'nacional_shipment_reports')) {
+    if ((payload.type === 'UPDATE' || payload.type === 'INSERT') && (payload.table === 'usa_shipment_reports' || payload.table === 'nacional_shipment_reports')) {
         const oldStatus = payload.old_record?.logistic_status;
         const newStatus = payload.record?.logistic_status;
         
-        // Si actualizaron otra cosa pero el estatus logístico NO cambió, ignoramos.
-        if (!newStatus || oldStatus === newStatus) {
+        // Si es un UPDATE y el estatus logístico no cambió, ignoramos.
+        if (payload.type === 'UPDATE' && (!newStatus || oldStatus === newStatus)) {
+            console.log("⏭️ Estatus sin cambios. No se envía alerta.");
             return new Response(JSON.stringify({ success: true, message: "Estatus sin cambios" }), { status: 200 });
         }
 
@@ -96,13 +100,16 @@ serve(async (req) => {
             }
         }
 
-        const motivoTexto = `🟢 NUEVO ESTATUS: ${newStatus}`;
+        const motivoTexto = payload.type === 'INSERT' 
+            ? `🚀 NUEVO VIAJE CREADO: ${newStatus}` 
+            : `🟢 NUEVO ESTATUS: ${newStatus}`;
+            
         const detallesTexto = lat && lng 
-            ? `Estatus actualizado manualmente. Ubicación actual: https://maps.google.com/?q=${lat},${lng}`
-            : `Estatus actualizado manualmente. (Aún sin enlace satelital GPS).`;
+            ? `Actualizado desde plataforma. Ubicación reciente: https://maps.google.com/?q=${lat},${lng}`
+            : `Actualizado desde plataforma. (Aún sin enlace satelital GPS).`;
 
         await enviarWhatsApp(supabase, tripId || 'Sin Folio', trackerId || 'N/A', motivoTexto, detallesTexto);
-        return new Response(JSON.stringify({ success: true, message: "Alerta de estatus enviada" }), { status: 200 });
+        return new Response(JSON.stringify({ success: true, message: "Alerta enviada" }), { status: 200 });
     }
 
     // =========================================================
@@ -128,9 +135,10 @@ serve(async (req) => {
         await supabase.from('tive_events').insert({
             tracker_id: trackerId, temperature: tempF, humidity: hum, lat: lat, lng: lng, location: locName, battery: bat, timestamp: time, alert_type: alertType
         });
+        console.log(`📡 Datos guardados para ${trackerId}. Temp: ${tempF}, Lat/Lng: ${lat},${lng}`);
     }
 
-    // Evaluamos SOLO emergencias (Temperatura, Desvío, Parada)
+    // Evaluamos SOLO emergencias configuradas explícitamente en Tive
     const isStopAlert = alertType.includes('stop');
     const requiresNotification = alertType === 'route_deviation' || alertType === 'temperature' || isStopAlert;
 
