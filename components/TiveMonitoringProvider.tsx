@@ -13,6 +13,9 @@ interface TiveData {
     speed?: number;
     avgSpeed?: number;
     predictedEta?: string;
+    currentEtaUtc?: string;
+    etaDate?: string;
+    distanceLeftKm?: number;
     etaLabel?: string;
     isDelayed?: boolean;
     noSignal?: boolean;
@@ -59,12 +62,11 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
         try {
             const updatePayload: any = { logistic_status: newStatus };
             
-            // Estampado de tiempos específicos según el hito
             if (eventType === 'ENTRY_E2') updatePayload.arrived_at_stop_over = new Date().toISOString();
             if (eventType === 'EXIT_E2') updatePayload.departed_from_stop_over = new Date().toISOString();
             if (eventType === 'ARRIVAL_CLIENT') {
                 updatePayload.arrival_date_time = new Date().toISOString();
-                updatePayload.rating_pending = true; // JEFE: Marcamos auditoría pendiente al arribar
+                updatePayload.rating_pending = true;
             }
 
             const { error } = await supabase
@@ -103,13 +105,13 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
 
                 const { data: history } = await supabase
                     .from('tive_events')
-                    .select('temperature, timestamp, alert_type, battery, location, lat, lng, speed')
+                    .select('temperature, timestamp, alert_type, battery, location, lat, lng, speed, current_eta_utc, eta_date, distance_left_km, predicted_eta')
                     .eq('tracker_id', trackerId)
                     .order('timestamp', { ascending: false })
                     .limit(5);
 
                 if (history && history.length > 0) {
-                    const latest = history[0];
+                    const latest = history[0] as any;
                     const dataAgeMinutes = (now - new Date(latest.timestamp).getTime()) / 60000;
                     const isRealtime = dataAgeMinutes < 15;
                     
@@ -128,7 +130,7 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                     const project = proyectos.find(p => p.id === shipment.project_id);
                     const stopOver = shipment.stop_over_project_id ? proyectos.find(p => p.id === shipment.stop_over_project_id) : null;
 
-                    // MI DIOS: MOTOR DE DETECCIÓN NOMINAL DE GEOCERCAS
+                    // MOTOR DE DETECCIÓN NOMINAL DE GEOCERCAS
                     if (latest.lat && latest.lng && isRealtime) {
                         const currentStatus = shipment.logistic_status || '';
                         
@@ -146,11 +148,9 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                             const dist = calculateDistance(latest.lat, latest.lng, stopOver.lat, stopOver.lng);
                             const radio = (stopOver.radioGeocercaMetros || 500) / 1000;
                             
-                            // Entrada a E2
                             if (dist <= radio && currentStatus !== `En ${stopOver.nombre}`) {
                                 await autoUpdateStatus(shipment.id, shipment.trip_id, `En ${stopOver.nombre}`, 'ENTRY_E2');
                             }
-                            // Salida de E2
                             if (dist > radio && currentStatus === `En ${stopOver.nombre}` && displaySpeed > 10) {
                                 await autoUpdateStatus(shipment.id, shipment.trip_id, `En Tránsito`, 'EXIT_E2');
                             }
@@ -161,15 +161,19 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                             const dist = calculateDistance(latest.lat, latest.lng, project.lat, project.lng);
                             const radio = (project.radioGeocercaMetros || 500) / 1000;
                             
-                            // Si está dentro del origen
                             if (dist <= radio && currentStatus !== `En ${project.nombre}`) {
                                 await autoUpdateStatus(shipment.id, shipment.trip_id, `En ${project.nombre}`, 'AT_ORIGIN');
                             }
-                            // Detección de salida hacia tránsito
                             if (dist > radio && currentStatus.startsWith('En ') && displaySpeed > 10) {
                                 await autoUpdateStatus(shipment.id, shipment.trip_id, `En Tránsito`, 'DEPARTURE');
                             }
                         }
+                    }
+
+                    // Calculamos la distancia restante hacia el cliente usando las coordenadas
+                    let distanceToClient: number | undefined = undefined;
+                    if (client?.lat && client?.lng && latest.lat && latest.lng) {
+                        distanceToClient = Math.round(calculateDistance(latest.lat, latest.lng, client.lat, client.lng));
                     }
 
                     newData[shipment.id] = {
@@ -180,7 +184,10 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                         location: latest.location || 'Localizando...',
                         speed: displaySpeed,
                         avgSpeed: avgSpeed,
-                        predictedEta: predictedEta || undefined,
+                        predictedEta: latest.current_eta_utc || latest.eta_date || latest.predicted_eta || predictedEta || undefined,
+                        currentEtaUtc: latest.current_eta_utc || latest.currentEtaUtc,
+                        etaDate: latest.eta_date || latest.etaDate,
+                        distanceLeftKm: latest.distance_left_km ?? latest.distanceLeftKm ?? distanceToClient,
                         etaLabel,
                         isDelayed,
                         noSignal: dataAgeMinutes > 40,

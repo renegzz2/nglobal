@@ -524,30 +524,28 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             header: "ETA",
             accessor: (r) => {
                 const live = latestTiveData[r.id];
-                // Nota: Asegúrate de que las propiedades 'eta' y 'distance' coincidan 
-                // con la respuesta real de tu integración con la API de Tive.
-                const eta = live?.eta; 
+                const eta = live?.currentEtaUtc || live?.etaDate || live?.predictedEta;
                 
+                if (!eta) {
+                    return (
+                        <div className="flex items-center gap-1.5 text-[9px] font-bold text-amber-600 italic">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
+                            Sin ETA
+                        </div>
+                    );
+                }
+
                 return (
                     <div className="flex items-center gap-1.5">
-                        {eta ? (
-                            <>
-                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
-                                <span className="text-[10px] font-black text-primary uppercase">
-                                    {new Date(eta).toLocaleString('es-MX', { 
-                                        day: '2-digit', 
-                                        month: 'short', 
-                                        hour: '2-digit', 
-                                        minute: '2-digit' 
-                                    })}
-                                </span>
-                            </>
-                        ) : (
-                            <div className="flex items-center gap-1.5 text-[9px] font-bold text-text-muted italic">
-                                <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
-                                S/D
-                            </div>
-                        )}
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                        <span className="text-[10px] font-black text-primary uppercase">
+                            {new Date(eta).toLocaleString('es-MX', { 
+                                day: '2-digit', 
+                                month: 'short', 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                            })}
+                        </span>
                     </div>
                 );
             }
@@ -556,21 +554,19 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             header: "DISTANCIA",
             accessor: (r) => {
                 const live = latestTiveData[r.id];
-                const distance = live?.distance; // Puede ser live?.distanceToDestination dependiendo de tu modelo
+                const distance = live?.distanceLeftKm ?? live?.distance;
                 
+                if (distance === undefined || distance === null) {
+                    return <span className="text-[9px] font-bold text-text-muted italic">N/A</span>;
+                }
+
                 return (
-                    <div className="flex items-center gap-1.5">
-                        {distance ? (
-                            <span className="text-[10px] font-black text-primary uppercase">
-                                {distance} km
-                            </span>
-                        ) : (
-                            <span className="text-[9px] font-bold text-text-muted italic">S/D</span>
-                        )}
-                    </div>
+                    <span className="text-[10px] font-black text-primary uppercase">
+                        {Math.round(Number(distance))} km
+                    </span>
                 );
             }
-        },
+        }
         {
             header: "ESTATUS LOGISTICO",
             accessor: (r) => (
