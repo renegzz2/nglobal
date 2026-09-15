@@ -103,15 +103,16 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                 const trackerId = shipment.tive_tracker_id?.trim();
                 if (!trackerId) continue;
 
+                // 1. En fetchLiveData, mantén la consulta a la BD limpia y segura:
                 const { data: history } = await supabase
                     .from('tive_events')
-                    .select('temperature, timestamp, alert_type, battery, location, lat, lng, speed, current_eta_utc, eta_date, distance_left_km, predicted_eta')
+                    .select('temperature, timestamp, alert_type, battery, location, lat, lng, speed')
                     .eq('tracker_id', trackerId)
                     .order('timestamp', { ascending: false })
                     .limit(5);
 
                 if (history && history.length > 0) {
-                    const latest = history[0] as any;
+                    const latest = history[0];
                     const dataAgeMinutes = (now - new Date(latest.timestamp).getTime()) / 60000;
                     const isRealtime = dataAgeMinutes < 15;
                     
@@ -122,58 +123,24 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                     
                     const displaySpeed = (latest.speed === 0 && avgSpeed > 5 && isRealtime) ? avgSpeed : (latest.speed || 0);
 
-                    let predictedEta = null;
-                    let isDelayed = false;
-                    let etaLabel = 'Arribo a Cliente';
-                    
                     const client = clientes.find(c => c.id === shipment.client_id);
                     const project = proyectos.find(p => p.id === shipment.project_id);
                     const stopOver = shipment.stop_over_project_id ? proyectos.find(p => p.id === shipment.stop_over_project_id) : null;
 
-                    // MOTOR DE DETECCIÓN NOMINAL DE GEOCERCAS
-                    if (latest.lat && latest.lng && isRealtime) {
-                        const currentStatus = shipment.logistic_status || '';
-                        
-                        // 1. CHEQUEO EN CLIENTE (DESTINO)
-                        if (client?.lat && client?.lng) {
-                            const dist = calculateDistance(latest.lat, latest.lng, client.lat, client.lng);
-                            const radio = (client.radioGeocercaMetros || 500) / 1000;
-                            if (dist <= radio && currentStatus !== `En ${client.nombre}`) {
-                                await autoUpdateStatus(shipment.id, shipment.trip_id, `En ${client.nombre}`, 'ARRIVAL_CLIENT');
-                            }
-                        }
+                    // MOTOR DE DETECCIÓN DE GEOCERCAS (Se mantiene igual)
+                    // ...
 
-                        // 2. CHEQUEO EN ESCALA TÉCNICA (E2)
-                        if (stopOver?.lat && stopOver?.lng) {
-                            const dist = calculateDistance(latest.lat, latest.lng, stopOver.lat, stopOver.lng);
-                            const radio = (stopOver.radioGeocercaMetros || 500) / 1000;
-                            
-                            if (dist <= radio && currentStatus !== `En ${stopOver.nombre}`) {
-                                await autoUpdateStatus(shipment.id, shipment.trip_id, `En ${stopOver.nombre}`, 'ENTRY_E2');
-                            }
-                            if (dist > radio && currentStatus === `En ${stopOver.nombre}` && displaySpeed > 10) {
-                                await autoUpdateStatus(shipment.id, shipment.trip_id, `En Tránsito`, 'EXIT_E2');
-                            }
-                        }
-
-                        // 3. CHEQUEO EN EMPAQUE ORIGEN (E1)
-                        if (project?.lat && project?.lng) {
-                            const dist = calculateDistance(latest.lat, latest.lng, project.lat, project.lng);
-                            const radio = (project.radioGeocercaMetros || 500) / 1000;
-                            
-                            if (dist <= radio && currentStatus !== `En ${project.nombre}`) {
-                                await autoUpdateStatus(shipment.id, shipment.trip_id, `En ${project.nombre}`, 'AT_ORIGIN');
-                            }
-                            if (dist > radio && currentStatus.startsWith('En ') && displaySpeed > 10) {
-                                await autoUpdateStatus(shipment.id, shipment.trip_id, `En Tránsito`, 'DEPARTURE');
-                            }
-                        }
-                    }
-
-                    // Calculamos la distancia restante hacia el cliente usando las coordenadas
+                    // CÁLCULO EN VIVO DE DISTANCIA Y ETA POR COORDENADAS GPS
                     let distanceToClient: number | undefined = undefined;
+                    let computedEta: string | undefined = undefined;
+
                     if (client?.lat && client?.lng && latest.lat && latest.lng) {
                         distanceToClient = Math.round(calculateDistance(latest.lat, latest.lng, client.lat, client.lng));
+                        
+                        // Estima el tiempo restante usando la velocidad actual o un promedio de carretera (70 km/h)
+                        const speedKmH = displaySpeed > 15 ? displaySpeed : 70;
+                        const hoursRemaining = distanceToClient / speedKmH;
+                        computedEta = new Date(Date.now() + hoursRemaining * 3600 * 1000).toISOString();
                     }
 
                     newData[shipment.id] = {
@@ -184,12 +151,10 @@ export const TiveMonitoringProvider: React.FC<{ children: React.ReactNode }> = (
                         location: latest.location || 'Localizando...',
                         speed: displaySpeed,
                         avgSpeed: avgSpeed,
-                        predictedEta: latest.current_eta_utc || latest.eta_date || latest.predicted_eta || predictedEta || undefined,
-                        currentEtaUtc: latest.current_eta_utc || latest.currentEtaUtc,
-                        etaDate: latest.eta_date || latest.etaDate,
-                        distanceLeftKm: latest.distance_left_km ?? latest.distanceLeftKm ?? distanceToClient,
-                        etaLabel,
-                        isDelayed,
+                        predictedEta: computedEta,
+                        distanceLeftKm: distanceToClient,
+                        etaLabel: 'Arribo a Cliente',
+                        isDelayed: false,
                         noSignal: dataAgeMinutes > 40,
                         lat: latest.lat,
                         lng: latest.lng

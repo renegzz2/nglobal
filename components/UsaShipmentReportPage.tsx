@@ -524,13 +524,13 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             header: "ETA",
             accessor: (r) => {
                 const live = latestTiveData[r.id];
-                const eta = live?.currentEtaUtc || live?.etaDate || live?.predictedEta;
+                const eta = live?.predictedEta;
                 
                 if (!eta) {
                     return (
-                        <div className="flex items-center gap-1.5 text-[9px] font-bold text-amber-600 italic">
-                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
-                            Sin ETA
+                        <div className="flex items-center gap-1.5 text-[9px] font-bold text-text-muted italic">
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
+                            S/D
                         </div>
                     );
                 }
@@ -554,19 +554,19 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             header: "DISTANCIA",
             accessor: (r) => {
                 const live = latestTiveData[r.id];
-                const distance = live?.distanceLeftKm ?? live?.distance;
+                const distance = live?.distanceLeftKm;
                 
                 if (distance === undefined || distance === null) {
-                    return <span className="text-[9px] font-bold text-text-muted italic">N/A</span>;
+                    return <span className="text-[9px] font-bold text-text-muted italic">S/D</span>;
                 }
 
                 return (
                     <span className="text-[10px] font-black text-primary uppercase">
-                        {Math.round(Number(distance))} km
+                        {distance} km
                     </span>
                 );
             }
-        }
+        },
         {
             header: "ESTATUS LOGISTICO",
             accessor: (r) => (
