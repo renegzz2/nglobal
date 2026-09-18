@@ -276,6 +276,7 @@ export interface UsaShipmentReport extends BaseDBEntity {
   comments?: string;
   incidents: Incident[];
   idealTemp?: number | string | null;
+  min_temp?: number | string | null;
   invoiceNumber?: string;
   invoiceUrl?: string;
   // MI DIOS: Campos para Carrier Scorecard

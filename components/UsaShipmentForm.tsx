@@ -31,6 +31,7 @@ interface TransportUnit {
     boxNumber: string;
     sealNumber: string;
     temperature: string;
+    minTemperature: string;
     totalRealBoxes: string;
     tiveTrackerId: string;
     hasTiveTracker: boolean;
@@ -189,7 +190,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [loadingResources, setLoadingResources] = useState(false);
 
     const [units, setUnits] = useState<TransportUnit[]>([
-        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', temperature: '48.2', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
     ]);
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
@@ -277,7 +278,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 tractorPlates: initialData.tractorPlates || '',
                 boxNumber: initialData.boxNumber || '',
                 sealNumber: initialData.sealNumber || '',
-                temperature: String(initialData.temperature || initialData.idealTemp || '48.2'),
+                minTemperature: String(initialData.min_temp || '45.0'), // <-- NUEVA
+                temperature: String(initialData.temperature || initialData.idealTemp || '51.0'),
                 totalRealBoxes: String(initialData.totalRealBoxes || ''),
                 tiveTrackerId: isUsingTripIdAsTive ? '' : (initialData.tiveTrackerId || ''),
                 hasTiveTracker: !isUsingTripIdAsTive,
@@ -476,6 +478,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             tractorPlates: u.tractorPlates,
             boxNumber: u.boxNumber,
             sealNumber: u.sealNumber,
+            min_temp: parseFloat(u.minTemperature) || null,
             temperature: parseFloat(u.temperature) || null,
             totalRealBoxes: parseInt(u.totalRealBoxes) || null,
             idealTemp: baseData.temperatureIdeal,
@@ -820,9 +823,19 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div><label className={labelClasses}>Set Point (°F)</label><input type="text" value={unit.temperature} onChange={(e) => handleUnitChange(unit.id, 'temperature', e.target.value)} className={inputClasses} placeholder="35.0" /></div>
-                                                <div><label className={labelClasses}>Total de Cajas</label><input type="number" value={unit.totalRealBoxes} onChange={(e) => handleUnitChange(unit.id, 'totalRealBoxes', e.target.value)} className={inputClasses} /></div>
+                                            <div className="grid grid-cols-3 gap-4">
+                                                <div>
+                                                    <label className={labelClasses}>Temp Mín (°F)</label>
+                                                    <input type="text" value={unit.minTemperature} onChange={(e) => handleUnitChange(unit.id, 'minTemperature', e.target.value)} className={inputClasses} placeholder="45.0" />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Temp Máx (°F)</label>
+                                                    <input type="text" value={unit.temperature} onChange={(e) => handleUnitChange(unit.id, 'temperature', e.target.value)} className={inputClasses} placeholder="51.0" />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Total de Cajas</label>
+                                                    <input type="number" value={unit.totalRealBoxes} onChange={(e) => handleUnitChange(unit.id, 'totalRealBoxes', e.target.value)} className={inputClasses} />
+                                                </div>
                                             </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div><label className={labelClasses}>Sello Fiscal</label><input type="text" value={unit.sealNumber} onChange={(e) => handleUnitChange(unit.id, 'sealNumber', e.target.value)} className={inputClasses} placeholder="999999" /></div>

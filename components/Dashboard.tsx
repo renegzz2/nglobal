@@ -102,10 +102,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewChange }) => {
       const live = latestTiveData[r.id];
       if (!live) return false;
 
-      // 1. Excursión de Temperatura (> 4°F de diferencia)
-      const ideal = Number(r.ideal_temp || r.temperature || 48.2);
-      const tempDiff = live.temp ? Math.abs(live.temp - ideal) : 0;
-      const hasTempExcursion = tempDiff > 4;
+      // 1. Excursión de Temperatura (Rango Dinámico desde BD)
+      const maxTemp = Number(r.temperature || r.ideal_temp || 51.0); // Set Point (Máxima)
+      const minTemp = Number(r.min_temp || 45.0);                    // Mínima
+      let hasTempExcursion = false;
+      
+      if (live.temp) {
+          hasTempExcursion = live.temp < minTemp || live.temp > maxTemp;
+      }
 
       // 2. Retraso Crítico (> 2 horas sobre ETA)
       const isVeryLate = live.isDelayed && live.predictedEta && r.expected_arrival &&
