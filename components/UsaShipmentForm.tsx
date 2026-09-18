@@ -189,7 +189,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [loadingResources, setLoadingResources] = useState(false);
 
     const [units, setUnits] = useState<TransportUnit[]>([
-        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', temperature: '', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', temperature: '48.2', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
     ]);
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
@@ -277,7 +277,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 tractorPlates: initialData.tractorPlates || '',
                 boxNumber: initialData.boxNumber || '',
                 sealNumber: initialData.sealNumber || '',
-                temperature: String(initialData.temperature || ''),
+                temperature: String(initialData.temperature || initialData.idealTemp || '48.2'),
                 totalRealBoxes: String(initialData.totalRealBoxes || ''),
                 tiveTrackerId: isUsingTripIdAsTive ? '' : (initialData.tiveTrackerId || ''),
                 hasTiveTracker: !isUsingTripIdAsTive,
@@ -325,7 +325,11 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         }));
 
         const newTotal = [...baseData.products, ...newProducts].reduce((acc, p) => acc + Number(p.realQty), 0);
-        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
+        setUnits(prev => prev.map(u => ({ 
+            ...u, 
+            totalRealBoxes: String(newTotal),
+            temperature: baseData.lotesAsociados.length === 0 ? String(lote.temperaturaIdeal || '48.2') : u.temperature 
+        })));
         addNotification({ type: 'success', title: 'Lote Añadido', message: `Carga de ${lote.proyecto} integrada al viaje.` });
     };
 

@@ -103,7 +103,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewChange }) => {
       if (!live) return false;
 
       // 1. Excursión de Temperatura (> 4°F de diferencia)
-      const ideal = Number(r.ideal_temp || r.temperature || 35);
+      const ideal = Number(r.ideal_temp || r.temperature || 48.2);
       const tempDiff = live.temp ? Math.abs(live.temp - ideal) : 0;
       const hasTempExcursion = tempDiff > 4;
 
@@ -240,7 +240,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onViewChange }) => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {priorityAlerts.map(alert => {
               const live = latestTiveData[alert.id];
-              const ideal = alert.ideal_temp || 35;
+              const ideal = alert.ideal_temp || alert.temperature || 48.2;
               const isTempIssue = live.temp && Math.abs(live.temp - ideal) > 4;
 
               return (
