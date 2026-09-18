@@ -456,14 +456,23 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             header: "TEMP REAL-OPTIMA",
             accessor: (r) => {
                 const live = latestTiveData[r.id];
-                const ideal = r.idealTemp || r.temperature || '--';
-                const hasExcursion = live?.temp && ideal !== '--' && Math.abs(Number(live.temp) - Number(ideal)) > 4;
+                
+                // 1. Extraer límites dinámicos desde la BD (con valores de respaldo)
+                const minTemp = Number(r.min_temp || 45.0);
+                const maxTemp = Number(r.temperature || r.idealTemp || 51.0);
+                
+                // 2. Calcular la temperatura óptima (Promedio)
+                const optimaTemp = ((minTemp + maxTemp) / 2).toFixed(1);
+                
+                // 3. Evaluar alerta si la temperatura real se sale del rango exacto
+                const hasExcursion = live?.temp && (Number(live.temp) < minTemp || Number(live.temp) > maxTemp);
+                
                 return (
                     <div className="flex items-center gap-2">
                         <span className={`text-[11px] font-black ${hasExcursion ? 'text-danger animate-pulse' : 'text-primary'}`}>
-                            {live ? `${live.temp?.toFixed(1)}°F` : '--°F'}
+                            {live?.temp ? `${live.temp.toFixed(1)}°F` : '--°F'}
                         </span>
-                        <span className="text-[9px] font-bold text-text-muted">/ {ideal}°F</span>
+                        <span className="text-[9px] font-bold text-text-muted">/ {optimaTemp}°F</span>
                     </div>
                 );
             }
