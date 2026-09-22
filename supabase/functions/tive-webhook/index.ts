@@ -107,6 +107,9 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // =========================================================
+    // ESCENARIO 1: CAMBIOS EN PLATAFORMA (REACT)
+    // =========================================================
     if ((payload.type === 'UPDATE' || payload.type === 'INSERT') && (payload.table === 'usa_shipment_reports' || payload.table === 'nacional_shipment_reports')) {
         const oldStatus = payload.old_record?.logistic_status;
         const newStatus = payload.record?.logistic_status;
@@ -122,24 +125,27 @@ serve(async (req) => {
         }
         const motivoTexto = payload.type === 'INSERT' ? `🚀 NUEVO VIAJE: ${newStatus}` : `🟢 NUEVO ESTATUS: ${newStatus}`;
         const detallesTexto = lat && lng ? `Actualizado desde plataforma. Ubicación: https://maps.google.com/?q=${lat},${lng}` : `Actualizado desde plataforma (Sin GPS).`;
+        
         await enviarWhatsApp(supabase, tripId || 'Sin Folio', trackerId || 'N/A', motivoTexto, detallesTexto);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
-    // Búsqueda profunda del Tracker ID en cualquier parte del paquete
+    // =========================================================
+    // ESCENARIO 2: PING FÍSICO DESDE EL RASTREADOR TIVE
+    // =========================================================
     const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id || payload.trackerId || payload.alert?.trackerId || payload.shipment?.trackerId;
     
     if (!trackerId) return new Response(JSON.stringify({ success: true }), { status: 200 });
 
-    // ESTE LOG ASEGURA QUE SIEMPRE VEAS ACTIVIDAD AL BUSCAR EL TRACKER
     console.log(`📡 Ping recibido de Tive [Tracker: ${trackerId}]`);
 
     const rawAlertType = payload.alert?.type || payload.type || payload.alertType || 'NORMAL';
     const alertType = String(rawAlertType).toLowerCase();
     const hasAlertObject = !!payload.alert;
 
-    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
-    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('trip_id').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
+    // SE AGREGA 'logistic_status' AL SELECT PARA PODER LEER EN QUÉ ESTADO ESTÁ EL VIAJE
+    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('trip_id, logistic_status').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
+    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('trip_id, logistic_status').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
     const activeTrip = (activeUsa && activeUsa.length > 0) ? activeUsa[0] : ((activeNac && activeNac.length > 0) ? activeNac[0] : null);
 
     if (!activeTrip) return new Response(JSON.stringify({ success: true }), { status: 200 });
@@ -164,14 +170,21 @@ serve(async (req) => {
 
     const isStopAlert = alertType.includes('stop');
     const isDeviation = alertType.includes('route') || alertType.includes('geofence') || alertType.includes('deviation');
-    
-    // Escaneo brutal: Busca la palabra temperatura en todo el paquete JSON de Tive
     const stringifiedPayload = JSON.stringify(payload).toLowerCase();
     const isTemp = alertType.includes('temperature') || alertType.includes('temp') || stringifiedPayload.includes('"type":"temperature"');
 
     const requiresNotification = isDeviation || isTemp || isStopAlert;
 
     if (!requiresNotification) return new Response(JSON.stringify({ success: true }), { status: 200 });
+
+    // =========================================================
+    // NUEVO FILTRO: SILENCIAR ALERTAS SI ESTÁ EN REVISIÓN FDA
+    // =========================================================
+    const currentStatus = String(activeTrip.logistic_status).toUpperCase();
+    if (currentStatus === 'HOLD FDA' || currentStatus === 'REVIEW FDA' || currentStatus === 'REVEAM') {
+        console.log(`🔇 ALERTA SILENCIADA [Tracker: ${trackerId}]: El viaje ${activeTrip.trip_id} está en ${currentStatus}.`);
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
 
     let motivoTexto = "Notificación de Sistema";
     let detallesTexto = "Revisar plataforma.";
