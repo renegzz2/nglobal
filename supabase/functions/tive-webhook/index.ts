@@ -95,6 +95,52 @@ async function enviarWhatsApp(supabase: any, folioViaje: string, trackerId: stri
     }
 }
 
+// Función auxiliar para extraer datos enriquecidos del viaje
+async function buildRichDetailsText(supabase: any, tripRecord: any, baseDetails: string, isPingEvent: boolean) {
+    let clientName = 'S/D';
+    let carrierName = 'S/D';
+    let productDetails = 'S/D';
+    let invoiceNumbers = 'S/D';
+
+    // 1. Obtener Nombre del Cliente
+    if (tripRecord.client_id) {
+        const { data: clientData } = await supabase.from('usa_clientes').select('nombre').eq('id', tripRecord.client_id).single();
+        if (clientData) clientName = clientData.nombre;
+    }
+
+    // 2. Obtener Línea Transportista
+    if (tripRecord.linea_transportista_id) {
+        const { data: carrierData } = await supabase.from('usa_lineas_transporte').select('nombre').eq('id', tripRecord.linea_transportista_id).single();
+        if (carrierData) carrierName = carrierData.nombre;
+    }
+
+    // 3. Obtener Productos y Facturas
+    if (tripRecord.products && Array.isArray(tripRecord.products) && tripRecord.products.length > 0) {
+        const productNames: string[] = [];
+        const invoices: string[] = [];
+        
+        for (const prod of tripRecord.products) {
+            let name = prod.manualProductName || prod.manual_product_name;
+            if (!name && (prod.productId || prod.product_id)) {
+                const { data: prodData } = await supabase.from('usa_productos').select('nombre_del_producto').eq('id', prod.productId || prod.product_id).single();
+                if (prodData) name = prodData.nombre_del_producto;
+            }
+            if (name) productNames.push(name);
+            
+            if (prod.invoiceNumber || prod.invoice_number) {
+                invoices.push(prod.invoiceNumber || prod.invoice_number);
+            }
+        }
+        if (productNames.length > 0) productDetails = productNames.join(', ');
+        if (invoices.length > 0) invoiceNumbers = invoices.join(', ');
+    }
+
+    const driverName = tripRecord.driver_name || 'Sin Asignar';
+
+    // Construir el bloque de texto con viñetas
+    return `📦No. Tracker: ${tripRecord.tive_tracker_id || 'N/A'}\n📄No Factura: ${invoiceNumbers}\n👥Cliente: ${clientName}\n🍱Productos: ${productDetails}\n🚚Línea transportista: ${carrierName}\n👤Nombre Operador: ${driverName}\n\n⚠️ ${baseDetails}`;
+}
+
 serve(async (req) => {
   if (req.method === 'GET') {
     const url = new URL(req.url);
@@ -124,8 +170,11 @@ serve(async (req) => {
             if (lastLocation) { lat = lastLocation.lat; lng = lastLocation.lng; }
         }
         const motivoTexto = payload.type === 'INSERT' ? `🚀 NUEVO VIAJE: ${newStatus}` : `🟢 NUEVO ESTATUS: ${newStatus}`;
-        const detallesTexto = lat && lng ? `Actualizado desde plataforma. Ubicación: https://maps.google.com/?q=${lat},${lng}` : `Actualizado desde plataforma (Sin GPS).`;
+        const baseDetails = lat && lng ? `Ubicación GPS: https://maps.google.com/?q=${lat},${lng}` : `Actualizado desde plataforma (Sin GPS).`;
         
+        // Enriquecer mensaje
+        const detallesTexto = await buildRichDetailsText(supabase, payload.record, baseDetails, false);
+
         await enviarWhatsApp(supabase, tripId || 'Sin Folio', trackerId || 'N/A', motivoTexto, detallesTexto);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
@@ -143,9 +192,9 @@ serve(async (req) => {
     const alertType = String(rawAlertType).toLowerCase();
     const hasAlertObject = !!payload.alert;
 
-    // SE AGREGA 'logistic_status' AL SELECT PARA PODER LEER EN QUÉ ESTADO ESTÁ EL VIAJE
-    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('trip_id, logistic_status').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
-    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('trip_id, logistic_status').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
+    // AHORA TRAEMOS TODA LA FILA PARA PODER EXTRAER PRODUCTOS, CLIENTE Y OPERADOR
+    const { data: activeUsa } = await supabase.from('usa_shipment_reports').select('*').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
+    const { data: activeNac } = await supabase.from('nacional_shipment_reports').select('*').eq('tive_tracker_id', trackerId).neq('logistic_status', 'Finalizado').neq('logistic_status', 'Cancelado').limit(1);
     const activeTrip = (activeUsa && activeUsa.length > 0) ? activeUsa[0] : ((activeNac && activeNac.length > 0) ? activeNac[0] : null);
 
     if (!activeTrip) return new Response(JSON.stringify({ success: true }), { status: 200 });
@@ -177,28 +226,29 @@ serve(async (req) => {
 
     if (!requiresNotification) return new Response(JSON.stringify({ success: true }), { status: 200 });
 
-    // =========================================================
-    // NUEVO FILTRO: SILENCIAR ALERTAS SI ESTÁ EN REVISIÓN FDA
-    // =========================================================
+    // FILTRO: SILENCIAR ALERTAS SI ESTÁ EN REVISIÓN FDA
     const currentStatus = String(activeTrip.logistic_status).toUpperCase();
-    if (currentStatus === 'HOLD FDA' || currentStatus === 'REVIEW FDA' || currentStatus === 'REVEAM') {
+    if (currentStatus === 'HOLD FDA' || currentStatus === 'REVIEW FDA') {
         console.log(`🔇 ALERTA SILENCIADA [Tracker: ${trackerId}]: El viaje ${activeTrip.trip_id} está en ${currentStatus}.`);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
     let motivoTexto = "Notificación de Sistema";
-    let detallesTexto = "Revisar plataforma.";
+    let baseDetails = "Revisar plataforma.";
 
     if (isTemp) {
         motivoTexto = "🌡️ ALERTA: TEMPERATURA";
-        detallesTexto = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
+        baseDetails = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
     } else if (isDeviation) {
         motivoTexto = "📍 ALERTA: DESVÍO";
-        detallesTexto = `Desviación de ruta/geocerca. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        baseDetails = `Desviación de ruta/geocerca. Mapa: https://maps.google.com/?q=${lat},${lng}`;
     } else if (isStopAlert) {
         motivoTexto = "⏱️ ALERTA: PARADA PROLONGADA";
-        detallesTexto = `El envío se detuvo más de lo permitido. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        baseDetails = `El envío se detuvo más de lo permitido. Mapa: https://maps.google.com/?q=${lat},${lng}`;
     }
+
+    // Enriquecer mensaje para eventos físicos
+    const detallesTexto = await buildRichDetailsText(supabase, activeTrip, baseDetails, true);
 
     await enviarWhatsApp(supabase, activeTrip.trip_id, trackerId, motivoTexto, detallesTexto);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
