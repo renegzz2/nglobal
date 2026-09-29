@@ -45,7 +45,8 @@ async function enviarWhatsApp(supabase: any, folioViaje: string, trackerId: stri
         const accessToken = Deno.env.get('whatsapp_token_');
 
         const limpiarTexto = (texto: string) => {
-            return String(texto || '').replace(/[\t\n\r⦁]/g, ' ').replace(/\s+/g, ' ').trim();
+            // SOLUCIÓN: Quitamos tabulaciones y viñetas raras, pero DEJAMOS los saltos de línea (\n)
+            return String(texto || '').replace(/[\t\r⦁]/g, ' ').replace(/ {2,}/g, ' ').trim();
         };
 
         const p1 = limpiarTexto(folioViaje) || 'Sin Folio';
@@ -96,7 +97,7 @@ async function enviarWhatsApp(supabase: any, folioViaje: string, trackerId: stri
 }
 
 // Función auxiliar para extraer datos enriquecidos del viaje
-async function buildRichDetailsText(supabase: any, tripRecord: any, baseDetails: string, isPingEvent: boolean) {
+async function buildRichDetailsText(supabase: any, tripRecord: any, baseDetails: string) {
     let clientName = 'S/D';
     let carrierName = 'S/D';
     let productDetails = 'S/D';
@@ -131,14 +132,14 @@ async function buildRichDetailsText(supabase: any, tripRecord: any, baseDetails:
                 invoices.push(prod.invoiceNumber || prod.invoice_number);
             }
         }
-        if (productNames.length > 0) productDetails = productNames.join(', ');
-        if (invoices.length > 0) invoiceNumbers = invoices.join(', ');
+        if (productNames.length > 0) productDetails = productNames.join(' | ');
+        if (invoices.length > 0) invoiceNumbers = invoices.join(' | ');
     }
 
-    const driverName = tripRecord.driver_name || 'Sin Asignar';
+    const driverName = tripRecord.driver_name || 'S/D';
 
-    // Construir el bloque de texto con viñetas
-    return `📦No. Tracker: ${tripRecord.tive_tracker_id || 'N/A'}\n📄No Factura: ${invoiceNumbers}\n👥Cliente: ${clientName}\n🍱Productos: ${productDetails}\n🚚Línea transportista: ${carrierName}\n👤Nombre Operador: ${driverName}\n\n⚠️ ${baseDetails}`;
+    // Construir el bloque de texto con viñetas y saltos de línea exactos
+    return `📦No. Tracker: ${tripRecord.tive_tracker_id || 'S/D'}\n📄No Factura: ${invoiceNumbers}\n👥Cliente: ${clientName}\n🍱Productos: ${productDetails}\n🚚Línea transportista: ${carrierName}\n👤Nombre Operador: ${driverName}\n\n📌 Estatus / Detalles:\n${baseDetails}`;
 }
 
 serve(async (req) => {
@@ -159,21 +160,25 @@ serve(async (req) => {
     if ((payload.type === 'UPDATE' || payload.type === 'INSERT') && (payload.table === 'usa_shipment_reports' || payload.table === 'nacional_shipment_reports')) {
         const oldStatus = payload.old_record?.logistic_status;
         const newStatus = payload.record?.logistic_status;
+        
         if (payload.type === 'UPDATE' && (!newStatus || oldStatus === newStatus)) {
             return new Response(JSON.stringify({ success: true }), { status: 200 });
         }
+        
         const tripId = payload.record.trip_id;
         const trackerId = payload.record.tive_tracker_id;
         let lat = null, lng = null;
+        
         if (trackerId) {
             const { data: lastLocation } = await supabase.from('tive_events').select('lat, lng').eq('tracker_id', trackerId).not('lat', 'is', null).order('timestamp', { ascending: false }).limit(1).single();
             if (lastLocation) { lat = lastLocation.lat; lng = lastLocation.lng; }
         }
+        
         const motivoTexto = payload.type === 'INSERT' ? `🚀 NUEVO VIAJE: ${newStatus}` : `🟢 NUEVO ESTATUS: ${newStatus}`;
         const baseDetails = lat && lng ? `Ubicación GPS: https://maps.google.com/?q=${lat},${lng}` : `Actualizado desde plataforma (Sin GPS).`;
         
         // Enriquecer mensaje
-        const detallesTexto = await buildRichDetailsText(supabase, payload.record, baseDetails, false);
+        const detallesTexto = await buildRichDetailsText(supabase, payload.record, baseDetails);
 
         await enviarWhatsApp(supabase, tripId || 'Sin Folio', trackerId || 'N/A', motivoTexto, detallesTexto);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
@@ -248,7 +253,7 @@ serve(async (req) => {
     }
 
     // Enriquecer mensaje para eventos físicos
-    const detallesTexto = await buildRichDetailsText(supabase, activeTrip, baseDetails, true);
+    const detallesTexto = await buildRichDetailsText(supabase, activeTrip, baseDetails);
 
     await enviarWhatsApp(supabase, activeTrip.trip_id, trackerId, motivoTexto, detallesTexto);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
