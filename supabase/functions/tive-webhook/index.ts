@@ -114,10 +114,18 @@ async function getRichData(supabase: any, tripRecord: any) {
                 if (data) name = data.nombre_del_producto;
             }
             if (name) productNames.push(name);
-            if (prod.invoiceNumber || prod.invoice_number) invoices.push(prod.invoiceNumber || prod.invoice_number);
+            
+            const inv = prod.invoiceNumber || prod.invoice_number;
+            if (inv) invoices.push(inv);
         }
-        if (productNames.length > 0) productDetails = productNames.join(' | ');
-        if (invoices.length > 0) invoiceNumbers = invoices.join(' | ');
+        
+        // Usamos Set para eliminar valores duplicados antes de unirlos con " | "
+        if (productNames.length > 0) {
+            productDetails = [...new Set(productNames)].join(' | ');
+        }
+        if (invoices.length > 0) {
+            invoiceNumbers = [...new Set(invoices)].join(' | ');
+        }
     }
 
     return {
