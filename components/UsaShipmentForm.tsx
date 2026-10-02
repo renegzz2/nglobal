@@ -175,6 +175,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         stopOverProjectId: '',
         sucursalId: '',
         clientId: '',
+        clientIds: [] as string[],
         lotesAsociados: [] as string[],
         products: [] as AuditProduct[],
         departureDateTime: '',
@@ -247,6 +248,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 stopOverProjectId: initialData.stopOverProjectId || '',
                 sucursalId: initialData.sucursalId || '',
                 clientId: initialData.clientId || '',
+                clientIds: initialData.clientIds || (initialData.clientId ? [initialData.clientId] : []),
                 lotesAsociados: initialLotes,
                 products: (initialData.products || []).map(p => ({
                     ...p,
@@ -459,7 +461,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             projectId: baseData.projectId === MANUAL_PROJECT_OPTION ? '' : baseData.projectId,
             stopOverProjectId: baseData.stopOverProjectId || null,
             sucursalId: baseData.sucursalId,
-            clientId: baseData.clientId,
+            client_id: baseData.clientIds.length > 0 ? baseData.clientIds[0] : null,
+            client_ids: baseData.clientIds,
             lineaTransportistaId: u.lineaId || null,
             unidadTransporteId: u.unidadId || null,
             isConsolidated: baseData.lotesAsociados.length > 1,
@@ -585,7 +588,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                         )}
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                             <label className={labelClasses}>Sede de Origen / Proyecto</label>
                                             <input
@@ -597,7 +600,47 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                 required
                                             />
                                         </div>
-                                        <div><label className={labelClasses}>Consignatario *</label><select value={baseData.clientId} onChange={(e) => setBaseData({ ...baseData, clientId: e.target.value })} className={inputClasses}><option value="">Seleccionar...</option>{clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div>
+                                        
+                                        <div className="space-y-2">
+                                            <label className={labelClasses}>Consignatarios (Multicliente) *</label>
+                                            <select
+                                                className={inputClasses}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (val && !baseData.clientIds.includes(val)) {
+                                                        setBaseData(prev => ({ ...prev, clientIds: [...prev.clientIds, val] }));
+                                                    }
+                                                    e.target.value = '';
+                                                }}
+                                                value=""
+                                            >
+                                                <option value="" disabled>+ Añadir cliente al viaje...</option>
+                                                {clientes.filter(c => !baseData.clientIds.includes(c.id)).map(c => (
+                                                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                                                ))}
+                                            </select>
+                                            
+                                            {/* Etiquetas de clientes seleccionados */}
+                                            {baseData.clientIds.length > 0 && (
+                                                <div className="flex flex-wrap gap-2 mt-3">
+                                                    {baseData.clientIds.map(id => {
+                                                        const c = clientes.find(x => x.id === id);
+                                                        return (
+                                                            <div key={id} className="flex items-center gap-2 bg-success/10 border border-success/20 text-success px-3 py-1.5 rounded-xl shadow-sm">
+                                                                <span className="text-[10px] font-black uppercase tracking-widest">{c?.nombre || 'Desconocido'}</span>
+                                                                <button 
+                                                                    type="button" 
+                                                                    onClick={() => setBaseData(prev => ({...prev, clientIds: prev.clientIds.filter(x => x !== id)}))} 
+                                                                    className="ml-1 p-0.5 hover:bg-success/20 hover:text-danger rounded-full transition-colors"
+                                                                >
+                                                                    <XIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-4">

@@ -96,7 +96,13 @@ async function getRichData(supabase: any, tripRecord: any) {
     let productDetails = 'S/D';
     let invoiceNumbers = 'S/D';
 
-    if (tripRecord?.client_id) {
+    // 1. Obtener Nombre del Cliente (Soporte Multicliente)
+    if (tripRecord?.client_ids && tripRecord.client_ids.length > 0) {
+        const { data } = await supabase.from('usa_clientes').select('nombre').in('id', tripRecord.client_ids);
+        if (data && data.length > 0) {
+            clientName = data.map(c => c.nombre).join(' | ');
+        }
+    } else if (tripRecord?.client_id) { // Respaldo para viajes antiguos
         const { data } = await supabase.from('usa_clientes').select('nombre').eq('id', tripRecord.client_id).single();
         if (data) clientName = data.nombre;
     }

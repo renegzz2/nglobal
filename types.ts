@@ -57,7 +57,8 @@ export interface StrategicProjection extends BaseDBEntity {
   liderProyectoId?: string;
   proyectoId: string;
   productoId: string;
-  clientId?: string; 
+  clientId?: string;
+  clientIds?: string[];
   presupuestoMonetario: number;
   venta2023Referencia: number;
   ng_2025: number;
