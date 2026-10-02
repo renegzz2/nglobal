@@ -58,7 +58,6 @@ export interface StrategicProjection extends BaseDBEntity {
   proyectoId: string;
   productoId: string;
   clientId?: string;
-  clientIds?: string[];
   presupuestoMonetario: number;
   venta2023Referencia: number;
   ng_2025: number;
@@ -254,6 +253,7 @@ export interface UsaShipmentReport extends BaseDBEntity {
   arrivedAtStopOver?: string;
   departedFromStopOver?: string;
   clientId: string;
+  clientIds?: string[];
   products: ProductQuantity[];
   logisticStatus: string;
   departureDateTime: string;

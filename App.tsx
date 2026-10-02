@@ -8,6 +8,7 @@ import NotificationsContainer from './components/NotificationsContainer';
 import Login from './components/Login';
 import Portal from './components/Portal';
 import ChatMessenger from './components/ChatMessenger';
+import ResetPasswordModal from './components/ResetPasswordModal';
 import { subscribeUserToPush } from './pushService';
 import { TableSkeleton } from './components/ui/Skeleton';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -19,7 +20,6 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { QualityForm } from './components/QualityForm';
 
 // CODE SPLITTING: Lazy load pages to optimize initial bundle size.
-// This ensures that complex mapping and charting libraries are only loaded when needed.
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const BaseDeDatosPage = lazy(() => import('./components/BaseDeDatosPage'));
 const UsaShipmentReportPage = lazy(() => import('./components/UsaShipmentReportPage'));
@@ -95,6 +95,9 @@ const App: React.FC = () => {
   const [isChatOpen, setIsChatOpen] = useState(window.innerWidth > 1200);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
+  // Estado para controlar la visibilidad del modal de recuperación de contraseña
+  const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
+
   if (!isSupabaseConfigured) {
     return (
       <NotificationProvider>
@@ -134,24 +137,22 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Listener principal de autenticación
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthUser(session?.user || null);
+
+      // Detecta cuando el usuario abre el enlace de recuperación de contraseña
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsResetPasswordOpen(true);
+      }
+
       if (!session?.user) {
         setUser(null);
         localStorage.removeItem('ng_selected_role');
         localStorage.removeItem('ng_auth_profile');
       }
     });
-
-    // Si el usuario es INSPECTOR y su vista actual no es de inspecciones, redirigir a Inspección Calidad 
-    useEffect(() => {
-    if (user?.role === UserRole.INSPECTOR) {
-      if (![View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView)) {
-        setCurrentView(View.INSPECTION_QUALITY);
-      }
-    }
-  }, [user, currentView]);
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setAuthUser(session?.user || null);
@@ -173,6 +174,15 @@ const App: React.FC = () => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Redirección separada e independiente para el rol INSPECTOR
+  useEffect(() => {
+    if (user?.role === UserRole.INSPECTOR) {
+      if (![View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView)) {
+        setCurrentView(View.INSPECTION_QUALITY);
+      }
+    }
+  }, [user, currentView]);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -228,8 +238,8 @@ const App: React.FC = () => {
     setDeferredPrompt(null);
   };
 
-
   const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     localStorage.removeItem('ng_selected_role');
     localStorage.removeItem('ng_auth_profile');
@@ -246,102 +256,93 @@ const App: React.FC = () => {
   const toggleChat = () => setIsChatOpen(!isChatOpen);
 
   const renderContent = () => {
-  if (!user) return null;
+    if (!user) return null;
 
-  // 1. Matriz estricta de permisos
-  const canAccess = (view: View) => {
-    // Las 3 vistas de Inspección SOLO pueden ser vistas por ADMINISTRADOR e INSPECTOR
-    if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
-      return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
-    }
+    // Matriz de permisos
+    const canAccess = (view: View) => {
+      if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
+        return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
+      }
 
-    // El rol INSPECTOR NO puede ver ninguna otra vista del sistema
-    if (user.role === UserRole.INSPECTOR) {
+      if (user.role === UserRole.INSPECTOR) {
+        return false;
+      }
+
+      if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
+      if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
+        return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
+      }
+      if (user.role === UserRole.LIDER_PROYECTO) {
+        return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
+      }
+      if (user.role === UserRole.COORDINADOR) {
+        return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
+      }
+      if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
+        return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
+      }
       return false;
-    }
+    };
 
-    // Permisos existentes para los demás roles
-    if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
-    if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-      return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
-    }
-    if (user.role === UserRole.LIDER_PROYECTO) {
-      return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
-    }
-    if (user.role === UserRole.COORDINADOR) {
-      return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
-    }
-    if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-      return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
-    }
-    return false;
-  };
-
-  let component;
-  
-  // 2. Redirección de respaldo si no tiene acceso a la vista solicitada
-  if (!canAccess(currentView)) {
-    if (user.role === UserRole.INSPECTOR) {
-      // Placeholder temporal mientras creamos los componentes de inspección
-      component = (
-        <div className="p-8 text-center bg-white rounded-3xl border border-border shadow-sm">
-          <h2 className="text-xl font-black text-primary uppercase">Módulo Inspecciones de Campo</h2>
-          <p className="text-sm text-text-secondary mt-2">Selecciona un submenú del panel izquierdo para comenzar.</p>
-        </div>
-      );
-    } else if ([UserRole.COORDINADOR, UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-      component = <UsaShipmentReportPage initialView="active" user={user} />;
-    } else if (user.role === UserRole.LIDER_PROYECTO) {
-      component = <StrategicPlanningPage user={user} />;
-    } else {
-      component = <Dashboard onViewChange={setCurrentView} />;
-    }
-  } else {
-    // 3. Renderizado de la vista solicitada
-    switch (currentView) {
-      case View.DASHBOARD: component = <Dashboard onViewChange={setCurrentView} />; break;
-      case View.DATABASE: component = <BaseDeDatosPage user={user} />; break;
-      case View.USA_SHIPMENTS: component = <UsaShipmentReportPage initialView="active" user={user} />; break;
-      case View.LIDER_PROGRAMACION_USA: component = <LiderProgramacionUsaPage user={user} />; break;
-      case View.FRUIT_QUALITY: component = <FruitQualityChecker />; break;
-      case View.STRATEGIC_PLANNING: component = <StrategicPlanningPage user={user} />; break;
-      case View.EXEC_REPORT: component = <ClientReportDashboard />; break;
-      case View.TIVE_MAP: component = <TiveMapPage />; break;
-      case View.SETTINGS: component = <SettingsPage user={user} onNavigate={setCurrentView} />; break;
-      case View.FREIGHT_PAYMENTS: component = <FreightPaymentPage />; break;
-      case View.INVENTORY: component = <InventoryPage />; break;
-      case View.POLICIES: component = <PoliciesPage onBack={() => {
-        setCurrentView(View.DASHBOARD);
-        window.history.pushState({}, '', '/');
-      }} />; break;
-
-      // Casos para las nuevas vistas (aquí se cargarán los componentes cuando los creemos)
-      // Vista principal de Inspección de Calidad con el nuevo formulario
-      case View.INSPECTION_QUALITY:
-        component = <QualityForm onSuccess={() => setCurrentView(View.DASHBOARD)} />;
-        break;
-
-      // Resto de submódulos en desarrollo
-      case View.INSPECTION_DASHBOARD:
-      case View.INSPECTION_INCIDENTS:
+    let component;
+    
+    if (!canAccess(currentView)) {
+      if (user.role === UserRole.INSPECTOR) {
         component = (
           <div className="p-8 text-center bg-white rounded-3xl border border-border shadow-sm">
             <h2 className="text-xl font-black text-primary uppercase">Módulo Inspecciones de Campo</h2>
-            <p className="text-sm text-text-secondary mt-2">Vista activa: <b>{currentView}</b></p>
+            <p className="text-sm text-text-secondary mt-2">Selecciona un submenú del panel izquierdo para comenzar.</p>
           </div>
         );
-        break;
+      } else if ([UserRole.COORDINADOR, UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
+        component = <UsaShipmentReportPage initialView="active" user={user} />;
+      } else if (user.role === UserRole.LIDER_PROYECTO) {
+        component = <StrategicPlanningPage user={user} />;
+      } else {
+        component = <Dashboard onViewChange={setCurrentView} />;
+      }
+    } else {
+      switch (currentView) {
+        case View.DASHBOARD: component = <Dashboard onViewChange={setCurrentView} />; break;
+        case View.DATABASE: component = <BaseDeDatosPage user={user} />; break;
+        case View.USA_SHIPMENTS: component = <UsaShipmentReportPage initialView="active" user={user} />; break;
+        case View.LIDER_PROGRAMACION_USA: component = <LiderProgramacionUsaPage user={user} />; break;
+        case View.FRUIT_QUALITY: component = <FruitQualityChecker />; break;
+        case View.STRATEGIC_PLANNING: component = <StrategicPlanningPage user={user} />; break;
+        case View.EXEC_REPORT: component = <ClientReportDashboard />; break;
+        case View.TIVE_MAP: component = <TiveMapPage />; break;
+        case View.SETTINGS: component = <SettingsPage user={user} onNavigate={setCurrentView} />; break;
+        case View.FREIGHT_PAYMENTS: component = <FreightPaymentPage />; break;
+        case View.INVENTORY: component = <InventoryPage />; break;
+        case View.POLICIES: component = <PoliciesPage onBack={() => {
+          setCurrentView(View.DASHBOARD);
+          window.history.pushState({}, '', '/');
+        }} />; break;
 
-      default: component = <Dashboard onViewChange={setCurrentView} />;
+        case View.INSPECTION_QUALITY:
+          component = <QualityForm onSuccess={() => setCurrentView(View.DASHBOARD)} />;
+          break;
+
+        case View.INSPECTION_DASHBOARD:
+        case View.INSPECTION_INCIDENTS:
+          component = (
+            <div className="p-8 text-center bg-white rounded-3xl border border-border shadow-sm">
+              <h2 className="text-xl font-black text-primary uppercase">Módulo Inspecciones de Campo</h2>
+              <p className="text-sm text-text-secondary mt-2">Vista activa: <b>{currentView}</b></p>
+            </div>
+          );
+          break;
+
+        default: component = <Dashboard onViewChange={setCurrentView} />;
+      }
     }
-  }
 
-  return (
-    <Suspense fallback={<TableSkeleton />}>
-      {component}
-    </Suspense>
-  );
-};
+    return (
+      <Suspense fallback={<TableSkeleton />}>
+        {component}
+      </Suspense>
+    );
+  };
 
   const getTitle = () => {
     switch (currentView) {
@@ -362,7 +363,7 @@ const App: React.FC = () => {
       case View.INSPECTION_INCIDENTS: return 'Reporte de Incidencias';
       default: return 'nglobal Logistics';
     }
-  }
+  };
 
   if (!authVerified) {
     return (
@@ -384,7 +385,7 @@ const App: React.FC = () => {
         <Suspense fallback={<TableSkeleton />}>
           <PoliciesPage isExternal onBack={() => {
             window.history.pushState({}, '', '/');
-            window.location.reload(); // Force reload to show login
+            window.location.reload();
           }} />
         </Suspense>
       );
@@ -403,7 +404,6 @@ const App: React.FC = () => {
     );
   }
 
-  // MI DIOS: Portal de acceso unificado por áreas
   if (!user) {
     if (!INSECURE_ROLE_PICKER_ENABLED) {
       return (
@@ -491,6 +491,13 @@ const App: React.FC = () => {
             <NotificationsContainer />
           </div>
         </div>
+
+        {/* MODAL DE RESTABLECIMIENTO DE CONTRASEÑA */}
+        <ResetPasswordModal
+          isOpen={isResetPasswordOpen}
+          onClose={() => setIsResetPasswordOpen(false)}
+        />
+
       </TiveMonitoringProvider>
     </NotificationProvider>
   );

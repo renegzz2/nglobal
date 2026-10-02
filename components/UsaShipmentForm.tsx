@@ -230,6 +230,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     }, [isOpen, initialData]);
 
     useEffect(() => {
+        if (!isOpen) return;
+
         if (initialData) {
             const initialProjectId = initialData.projectId || (initialData.project ? MANUAL_PROJECT_OPTION : '');
             
@@ -241,13 +243,23 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 if (initialData.loteSecundarioId) initialLotes.push(initialData.loteSecundarioId);
             }
 
+            // Sincronización robusta de consignatarios / multicliente
+            let initialClientIds: string[] = [];
+            if (initialData.clientIds && Array.isArray(initialData.clientIds) && initialData.clientIds.length > 0) {
+                initialClientIds = initialData.clientIds;
+            } else if ((initialData as any).client_ids && Array.isArray((initialData as any).client_ids) && (initialData as any).client_ids.length > 0) {
+                initialClientIds = (initialData as any).client_ids;
+            } else if (initialData.clientId) {
+                initialClientIds = [initialData.clientId];
+            }
+
             setBaseData({
-                tripId: initialData.tripId,
-                project: initialData.project,
+                tripId: initialData.tripId || '',
+                project: initialData.project || '',
                 projectId: initialProjectId,
                 stopOverProjectId: initialData.stopOverProjectId || '',
                 sucursalId: initialData.sucursalId || '',
-                clientId: initialData.clientId || '',
+                clientId: initialData.clientId || (initialClientIds[0] || ''),
                 clientIds: initialData.clientIds || (initialData.clientId ? [initialData.clientId] : []),
                 lotesAsociados: initialLotes,
                 products: (initialData.products || []).map(p => ({
@@ -280,7 +292,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 tractorPlates: initialData.tractorPlates || '',
                 boxNumber: initialData.boxNumber || '',
                 sealNumber: initialData.sealNumber || '',
-                minTemperature: String(initialData.min_temp || '45.0'), // <-- NUEVA
+                minTemperature: String(initialData.min_temp || '45.0'),
                 temperature: String(initialData.temperature || initialData.idealTemp || '51.0'),
                 totalRealBoxes: String(initialData.totalRealBoxes || ''),
                 tiveTrackerId: isUsingTripIdAsTive ? '' : (initialData.tiveTrackerId || ''),
@@ -295,8 +307,29 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 freightCostMxn: initialData.comments?.match(/\[MXN:([\d.]+)\]/)?.[1] || '',
                 isNew: false
             }]);
+        } else {
+            // Reiniciar estado limpio para nuevo viaje
+            setBaseData({
+                tripId: '',
+                project: '',
+                projectId: '',
+                stopOverProjectId: '',
+                sucursalId: '',
+                clientId: '',
+                clientIds: [],
+                lotesAsociados: [],
+                products: [],
+                departureDateTime: '',
+                realDepartureDate: '',
+                arrivalDateTime: '',
+                temperatureIdeal: null,
+                secondaryStatus: ''
+            });
+            setUnits([
+                { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+            ]);
         }
-    }, [initialData]);
+    }, [initialData, isOpen]);
 
     const handleAddLot = (loteId: string) => {
         if (!loteId || baseData.lotesAsociados.includes(loteId)) return;
@@ -319,10 +352,19 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
         const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
 
+        // Añadir el cliente del lote a la lista de multicliente automáticamente si existe
+        const lotClientId = lote.clientId || (lote as any).client_id;
+        const updatedClientIds = [...baseData.clientIds];
+        if (lotClientId && !updatedClientIds.includes(lotClientId)) {
+            updatedClientIds.push(lotClientId);
+        }
+
         setBaseData(prev => ({
             ...prev,
             lotesAsociados: newLotes,
             project: newProjectName,
+            clientIds: updatedClientIds,
+            clientId: prev.clientId || (updatedClientIds[0] || ''),
             products: [...prev.products, ...newProducts],
             departureDateTime: prev.lotesAsociados.length === 0 ? toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`) : prev.departureDateTime,
             temperatureIdeal: prev.lotesAsociados.length === 0 ? (lote.temperaturaIdeal || null) : prev.temperatureIdeal,
@@ -461,8 +503,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             projectId: baseData.projectId === MANUAL_PROJECT_OPTION ? '' : baseData.projectId,
             stopOverProjectId: baseData.stopOverProjectId || null,
             sucursalId: baseData.sucursalId,
-            client_id: baseData.clientIds.length > 0 ? baseData.clientIds[0] : null,
-            client_ids: baseData.clientIds,
+            clientId: baseData.clientIds.length > 0 ? baseData.clientIds[0] : null,
+            clientIds: baseData.clientIds,
             lineaTransportistaId: u.lineaId || null,
             unidadTransporteId: u.unidadId || null,
             isConsolidated: baseData.lotesAsociados.length > 1,
