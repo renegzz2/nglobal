@@ -332,8 +332,9 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         }
 
         return filtered.map(evt => ({ 
-            time: formatSafeDate(evt.timestamp), 
-            temp: evt.temperature 
+            time: formatSafeDate(evt.timestamp), // Hora corta para el eje X inferior
+            fullDate: formatFullSafeDate(evt.timestamp), // Fecha y hora completa para el recuadro flotante
+            temp: evt.temperature != null ? Number(Number(evt.temperature).toFixed(1)) : null // Redondea a 1 decimal
         }));
     }, [tiveHistory, timeFilter, customStart, customEnd]);
 
@@ -502,6 +503,23 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
             </div>
         </div>
     );
+
+    // DISEÑO DEL RECUADRO FLOTANTE DE LA GRÁFICA
+    const CustomTooltip = ({ active, payload }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-white p-3 rounded-xl shadow-lg border border-gray-100">
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                        {payload[0].payload.fullDate}
+                    </p>
+                    <p className="text-sm font-black text-[#002D62]">
+                        Temp: {payload[0].value}°F
+                    </p>
+                </div>
+            );
+        }
+        return null;
+    };
 
     return createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
@@ -795,7 +813,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                                 <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
                                                 <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
-                                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
+                                                <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '3 3' }} />
                                                 <Area type="monotone" dataKey="temp" stroke="#2563eb" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={4} />
                                             </AreaChart>
                                         </ResponsiveContainer>
