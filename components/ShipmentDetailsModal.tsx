@@ -43,6 +43,11 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
     const [lineas, setLineas] = useState<LineaTransporteDB[]>([]);
     const [projectProductMap, setProjectProductMap] = useState<Record<string, string[]>>({});
 
+    // ESTADOS PARA EL FILTRO TÉRMICO[cite: 18]
+    const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '48h' | 'custom'>('all');
+    const [customStart, setCustomStart] = useState<string>('');
+    const [customEnd, setCustomEnd] = useState<string>('');
+
     const { latestTiveData } = useTiveMonitoring();
     const { addNotification } = useNotification();
 
@@ -300,10 +305,37 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         }
     };
 
-    const chartData = useMemo(() => {
+    // MOTOR DE FILTRADO TÉRMICO[cite: 18]
+    const filteredChartData = useMemo(() => {
         if (!Array.isArray(tiveHistory) || !tiveHistory.length) return [];
-        return [...tiveHistory].reverse().filter(evt => evt.timestamp).map(evt => ({ time: formatSafeDate(evt.timestamp), temp: evt.temperature }));
-    }, [tiveHistory]);
+        
+        let filtered = [...tiveHistory].reverse().filter(evt => evt.timestamp);
+        
+        // Obtenemos el tiempo del último registro para que "Últimas 24h" funcione
+        const lastRecordTime = new Date(filtered[filtered.length - 1].timestamp).getTime();
+
+        if (timeFilter === '24h') {
+            const cutoff = lastRecordTime - (24 * 60 * 60 * 1000);
+            filtered = filtered.filter(evt => new Date(evt.timestamp).getTime() >= cutoff);
+        } else if (timeFilter === '48h') {
+            const cutoff = lastRecordTime - (48 * 60 * 60 * 1000);
+            filtered = filtered.filter(evt => new Date(evt.timestamp).getTime() >= cutoff);
+        } else if (timeFilter === 'custom') {
+            if (customStart) {
+                const start = new Date(customStart).getTime();
+                filtered = filtered.filter(evt => new Date(evt.timestamp).getTime() >= start);
+            }
+            if (customEnd) {
+                const end = new Date(customEnd).getTime();
+                filtered = filtered.filter(evt => new Date(evt.timestamp).getTime() <= end);
+            }
+        }
+
+        return filtered.map(evt => ({ 
+            time: formatSafeDate(evt.timestamp), 
+            temp: evt.temperature 
+        }));
+    }, [tiveHistory, timeFilter, customStart, customEnd]);
 
     const unifiedAlertsTimeline = useMemo(() => {
         const telemetryAlerts = Array.isArray(tiveHistory) 
@@ -703,27 +735,78 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                     </p>
                                 </div>
                             </div>
-                            <div className="bg-white p-8 rounded-2xl border border-border h-[400px] shadow-inner relative flex flex-col justify-center">
-                                {chartData && chartData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={chartData}>
-                                            <defs>
-                                                <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/></linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                            <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
-                                            <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
-                                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
-                                            <Area type="monotone" dataKey="temp" stroke="#2563eb" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={4} />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
-                                ) : (
-                                    <div className="flex items-center justify-center h-full border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
-                                        <p className="text-sm font-bold text-gray-400 uppercase tracking-widest text-center px-4">
-                                            Esperando primera lectura del sensor...
-                                        </p>
+                            <div className="bg-white p-8 rounded-2xl border border-border h-[450px] shadow-inner relative flex flex-col justify-center">
+                                {/* BOTONERA DE FILTRADO TÉRMICO[cite: 18] */}
+                                <div className="absolute top-4 right-8 z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                    <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm w-fit">
+                                        <button 
+                                            onClick={() => setTimeFilter('all')} 
+                                            className={`px-4 py-1.5 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all ${timeFilter === 'all' ? 'bg-[#002D62] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                                        >
+                                            Viaje Completo
+                                        </button>
+                                        <button 
+                                            onClick={() => setTimeFilter('24h')} 
+                                            className={`px-4 py-1.5 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all ${timeFilter === '24h' ? 'bg-[#002D62] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                                        >
+                                            Últimas 24h
+                                        </button>
+                                        <button 
+                                            onClick={() => setTimeFilter('48h')} 
+                                            className={`px-4 py-1.5 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all ${timeFilter === '48h' ? 'bg-[#002D62] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                                        >
+                                            Últimas 48h
+                                        </button>
+                                        <button 
+                                            onClick={() => setTimeFilter('custom')} 
+                                            className={`px-4 py-1.5 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all ${timeFilter === 'custom' ? 'bg-[#002D62] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                                        >
+                                            Filtro Exacto
+                                        </button>
                                     </div>
-                                )}
+
+                                    {timeFilter === 'custom' && (
+                                        <div className="flex items-center gap-2 animate-fade-in bg-white p-1 rounded-xl border border-gray-200 shadow-sm">
+                                            <input 
+                                                type="datetime-local" 
+                                                value={customStart} 
+                                                onChange={(e) => setCustomStart(e.target.value)} 
+                                                className="bg-transparent px-3 py-1.5 text-[10px] font-bold text-[#002D62] outline-none"
+                                            />
+                                            <span className="text-gray-400 font-bold">-</span>
+                                            <input 
+                                                type="datetime-local" 
+                                                value={customEnd} 
+                                                onChange={(e) => setCustomEnd(e.target.value)} 
+                                                className="bg-transparent px-3 py-1.5 text-[10px] font-bold text-[#002D62] outline-none"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* GRÁFICA TÉRMICA FILTRADA[cite: 18] */}
+                                <div className="h-full pt-12">
+                                    {filteredChartData && filteredChartData.length > 0 ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <AreaChart data={filteredChartData}>
+                                                <defs>
+                                                    <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/></linearGradient>
+                                                </defs>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
+                                                <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
+                                                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} />
+                                                <Area type="monotone" dataKey="temp" stroke="#2563eb" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={4} />
+                                            </AreaChart>
+                                        </ResponsiveContainer>
+                                    ) : (
+                                        <div className="flex items-center justify-center h-full border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 mt-12">
+                                            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest text-center px-4">
+                                                No hay datos en el rango seleccionado
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ) : activeTab === 'location' ? (
