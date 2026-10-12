@@ -521,6 +521,37 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         return null;
     };
 
+    // ÍCONO DE ALERTA TÉRMICA PERSONALIZADO PARA LA GRÁFICA
+    const CustomAlertDot = (props: any) => {
+        const { cx, cy, payload } = props;
+        
+        // 1. Extraemos los límites térmicos dinámicos del viaje
+        const minTemp = Number(report.min_temp || (mainProductSpec?.tempOptima ? Number(mainProductSpec.tempOptima) - 3 : 45.0));
+        const maxTemp = Number(report.temperature || report.idealTemp || mainProductSpec?.limiteSuperior || 51.0);
+        
+        const temp = payload.temp;
+        let isExcursion = false;
+        
+        // 2. Evaluamos si el punto actual es una excursión térmica
+        if (temp != null) {
+            isExcursion = temp < minTemp || temp > maxTemp;
+        }
+
+        // 3. Si hay excursión, dibujamos el ícono de alerta rojo
+        if (isExcursion) {
+            return (
+                <svg x={cx - 8} y={cy - 8} width={16} height={16} viewBox="0 0 24 24" fill="#fee2e2" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="drop-shadow-md">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            );
+        }
+        
+        // Si la temperatura es normal, no dibujamos nada
+        return null; 
+    };
+
     return createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
             <div className="bg-surface rounded-xl shadow-2xl w-full max-w-7xl flex flex-col border border-border h-[92vh] animate-fade-in overflow-hidden">
@@ -814,7 +845,16 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                                 <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
                                                 <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700}} />
                                                 <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '3 3' }} />
-                                                <Area type="monotone" dataKey="temp" stroke="#2563eb" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={4} />
+                                                <Area 
+                                                    type="monotone" 
+                                                    dataKey="temp" 
+                                                    stroke="#2563eb" 
+                                                    fillOpacity={1} 
+                                                    fill="url(#colorTemp)" 
+                                                    strokeWidth={4} 
+                                                    dot={<CustomAlertDot />} 
+                                                    activeDot={{ r: 6, strokeWidth: 0, fill: '#2563eb' }}
+                                                />
                                             </AreaChart>
                                         </ResponsiveContainer>
                                     ) : (

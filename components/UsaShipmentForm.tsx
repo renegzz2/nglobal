@@ -336,6 +336,51 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const lote = pendingLots.find(l => l.id === loteId);
         if (!lote) return;
 
+        // =================================================================
+        // MOTOR DE VALIDACIÓN TÉRMICA PARA CONSOLIDACIÓN (MULTICLIENTE/LTL)
+        // =================================================================
+        if (baseData.lotesAsociados.length > 0) {
+            // 1. Extraemos la configuración térmica actual del camión
+            const currentMin = parseFloat(units[0].minTemperature);
+            const currentMax = parseFloat(units[0].temperature);
+
+            let isCompatible = true;
+            let conflictingProduct = '';
+
+            // 2. Evaluamos cada producto del nuevo lote a ingresar
+            for (const p of (lote.productos || [])) {
+                const prodId = p.productId || p.product_id;
+                const spec = productSpecs.find(s => s.id === prodId);
+                
+                if (spec) {
+                    // Usamos tus columnas exactas de types.ts
+                    // Limite Tolerable (Mínima) y Limite Superior (Máxima)
+                    const prodMin = Number(spec.limiteTolerable ?? (spec.tempOptima ? spec.tempOptima - 3 : 45.0));
+                    const prodMax = Number(spec.limiteSuperior ?? 51.0);
+
+                    // 3. Verificamos si el rango del camión choca con los límites seguros del producto
+                    if (currentMin < prodMin || currentMax > prodMax) {
+                        isCompatible = false;
+                        conflictingProduct = spec.nombreDelProducto || 'Producto Especial';
+                        break;
+                    }
+                }
+            }
+
+            // 4. Detonamos la alerta en pantalla si son incompatibles
+            if (!isCompatible) {
+                const confirmed = window.confirm(
+                    `⚠️ ADVERTENCIA DE INCOMPATIBILIDAD TÉRMICA ⚠️\n\n` +
+                    `La temperatura actual del camión (${currentMin}°F a ${currentMax}°F) NO ES APTA para el producto que deseas conciliar: ${conflictingProduct}.\n\n` +
+                    `¿Estás absolutamente seguro de forzar la consolidación de este viaje?`
+                );
+                
+                // Si el usuario cancela, no agregamos el lote
+                if (!confirmed) return; 
+            }
+        }
+        // =================================================================
+
         const newProducts = (lote.productos || []).map((p: any) => ({
             ...p,
             id: Math.random().toString(),
@@ -352,19 +397,10 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
         const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
 
-        // Añadir el cliente del lote a la lista de multicliente automáticamente si existe
-        const lotClientId = lote.clientId || (lote as any).client_id;
-        const updatedClientIds = [...baseData.clientIds];
-        if (lotClientId && !updatedClientIds.includes(lotClientId)) {
-            updatedClientIds.push(lotClientId);
-        }
-
         setBaseData(prev => ({
             ...prev,
             lotesAsociados: newLotes,
             project: newProjectName,
-            clientIds: updatedClientIds,
-            clientId: prev.clientId || (updatedClientIds[0] || ''),
             products: [...prev.products, ...newProducts],
             departureDateTime: prev.lotesAsociados.length === 0 ? toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`) : prev.departureDateTime,
             temperatureIdeal: prev.lotesAsociados.length === 0 ? (lote.temperaturaIdeal || null) : prev.temperatureIdeal,
@@ -376,6 +412,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             totalRealBoxes: String(newTotal),
             temperature: baseData.lotesAsociados.length === 0 ? String(lote.temperaturaIdeal || '48.2') : u.temperature 
         })));
+        
         addNotification({ type: 'success', title: 'Lote Añadido', message: `Carga de ${lote.proyecto} integrada al viaje.` });
     };
 
