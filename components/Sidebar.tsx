@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, User, UserRole } from '../types';
 import { DownloadIcon, ChartBarIcon, MapIcon, SettingsIcon, TruckIcon, LayoutGridIcon, DatabaseIcon, TableIcon, BoxIcon, EyeIcon } from './icons';
 import { subscribeUserToPush } from '../pushService';
+import { ClipboardCheck } from 'lucide-react'; // Corrección para el ícono de Inspección
 
 interface SidebarProps {
   currentView: View;
@@ -14,8 +15,6 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogout, showInstallButton, onInstall }) => {
   const [pushEnabled, setPushEnabled] = useState(true);
-  
-  // Estado para controlar el menú desplegable de Inspecciones de Campo
   const [inspectionsOpen, setInspectionsOpen] = useState(false);
 
   useEffect(() => {
@@ -24,7 +23,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     }
   }, []);
 
-  // Abre automáticamente el menú de inspecciones si el usuario está navegando en alguna de sus subsecciones
   useEffect(() => {
     if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView)) {
       setInspectionsOpen(true);
@@ -42,35 +40,27 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     }`;
 
   const canSee = (view: View) => {
-  // 1. Regla especial para la nueva sección de Inspecciones (SOLO Administrador e Inspector)
-  if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
-    return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
-  }
-
-  // 2. Si el rol es INSPECTOR, no debe ver nada más que la sección de inspecciones
-  if (user.role === UserRole.INSPECTOR) {
+    if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
+      return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
+    }
+    if (user.role === UserRole.INSPECTOR) return false;
+    if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
+    if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
+      return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
+    }
+    if (user.role === UserRole.LIDER_PROYECTO) {
+      return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
+    }
+    if (user.role === UserRole.COORDINADOR) {
+      // AQUÍ ESTÁ EL CAMBIO: Se agrega View.DATABASE explícitamente para el Coordinador
+      return [View.DASHBOARD, View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
+    }
+    if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
+      return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
+    }
     return false;
-  }
+  };
 
-  // 3. Reglas existentes para los demás roles
-  if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
-
-  if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-    return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
-  }
-  if (user.role === UserRole.LIDER_PROYECTO) {
-    return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
-  }
-  if (user.role === UserRole.COORDINADOR) {
-    return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
-  }
-  if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-    return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
-  }
-  return false;
-};
-
-  // Verifica si el usuario tiene permiso para al menos un submenú de inspecciones
   const canSeeInspections = canSee(View.INSPECTION_QUALITY) || canSee(View.INSPECTION_DASHBOARD) || canSee(View.INSPECTION_INCIDENTS);
   const isInspectionsActive = [View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView);
 
@@ -93,10 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
       <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto no-scrollbar">
         {!pushEnabled && (
           <div className="px-2 mb-6">
-            <button
-              onClick={handleEnableNotifications}
-              className="w-full bg-warning/90 hover:bg-warning text-primary font-bold text-[11px] py-2.5 rounded-xl flex items-center justify-center gap-2 transform active:scale-95 transition-all shadow-lg uppercase tracking-wider"
-            >
+            <button onClick={handleEnableNotifications} className="w-full bg-warning/90 hover:bg-warning text-primary font-bold text-[11px] py-2.5 rounded-xl flex items-center justify-center gap-2 transform active:scale-95 transition-all shadow-lg uppercase tracking-wider">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
               Notificaciones Push
             </button>
@@ -145,18 +132,19 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           </button>
         )}
 
-        <button
-          onClick={() => setCurrentView(View.QUALITY_INSPECTION)}
-          className={`flex items-center gap-3 w-full p-3 rounded-xl font-bold transition-all ${
-            currentView === View.QUALITY_INSPECTION 
-              ? 'bg-blue-600 text-white shadow-md' 
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          {/* Puedes usar cualquier ícono de lucide-react como ClipboardCheck */}
-          <ClipboardCheck className="w-5 h-5" />
-          <span>Inspección Calidad</span>
-        </button>        
+        {canSee(View.QUALITY_INSPECTION) && (
+          <button
+            onClick={() => onNavigate(View.QUALITY_INSPECTION)}
+            className={`flex items-center gap-3 w-full p-3 rounded-xl font-bold transition-all ${
+              currentView === View.QUALITY_INSPECTION 
+                ? 'bg-blue-600 text-white shadow-md' 
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <ClipboardCheck className="w-5 h-5" />
+            <span>Inspección Calidad</span>
+          </button>        
+        )}
 
         {[UserRole.ADMINISTRADOR, UserRole.GERENCIA].includes(user.role) && (
           <div className="pt-4 pb-2 px-4">
@@ -186,9 +174,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           </button>
         )}
 
-        {/* ======================================================== */}
-        {/* SECCIÓN DESPLEGABLE: INSPECCIONES DE CAMPO               */}
-        {/* ======================================================== */}
         {canSeeInspections && (
           <div className="space-y-1">
             <button
@@ -201,63 +186,30 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
             >
               <div className="flex items-center space-x-3">
                 <div className={`p-1.5 rounded-lg ${isInspectionsActive ? 'bg-teal-500/20 text-teal-300' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
-                  {/* Ícono de Lista / Portapapeles */}
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                   </svg>
                 </div>
                 <span className="text-sm font-semibold tracking-tight">Inspecciones de Campo</span>
               </div>
-              <svg
-                className={`w-4 h-4 text-white/40 transition-transform duration-300 ${inspectionsOpen ? 'rotate-180' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-              </svg>
+              <svg className={`w-4 h-4 text-white/40 transition-transform duration-300 ${inspectionsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
             </button>
-
-            {/* Submenús desplegables */}
             {inspectionsOpen && (
               <div className="ml-6 pl-3 border-l border-white/10 space-y-1 my-1 transition-all">
                 {canSee(View.INSPECTION_QUALITY) && (
-                  <button
-                    onClick={() => onNavigate(View.INSPECTION_QUALITY)}
-                    className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      currentView === View.INSPECTION_QUALITY
-                        ? 'bg-teal-500/30 text-teal-200 font-bold border border-teal-400/30 shadow-sm'
-                        : 'text-white/50 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
+                  <button onClick={() => onNavigate(View.INSPECTION_QUALITY)} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${currentView === View.INSPECTION_QUALITY ? 'bg-teal-500/30 text-teal-200 font-bold border border-teal-400/30 shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full ${currentView === View.INSPECTION_QUALITY ? 'bg-teal-300 animate-pulse' : 'bg-white/30'}`}></div>
                     <span>Inspección calidad</span>
                   </button>
                 )}
-
                 {canSee(View.INSPECTION_DASHBOARD) && (
-                  <button
-                    onClick={() => onNavigate(View.INSPECTION_DASHBOARD)}
-                    className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      currentView === View.INSPECTION_DASHBOARD
-                        ? 'bg-teal-500/30 text-teal-200 font-bold border border-teal-400/30 shadow-sm'
-                        : 'text-white/50 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
+                  <button onClick={() => onNavigate(View.INSPECTION_DASHBOARD)} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${currentView === View.INSPECTION_DASHBOARD ? 'bg-teal-500/30 text-teal-200 font-bold border border-teal-400/30 shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full ${currentView === View.INSPECTION_DASHBOARD ? 'bg-teal-300 animate-pulse' : 'bg-white/30'}`}></div>
                     <span>Dashboard</span>
                   </button>
                 )}
-
                 {canSee(View.INSPECTION_INCIDENTS) && (
-                  <button
-                    onClick={() => onNavigate(View.INSPECTION_INCIDENTS)}
-                    className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                      currentView === View.INSPECTION_INCIDENTS
-                        ? 'bg-amber-500/30 text-amber-200 font-bold border border-amber-400/30 shadow-sm'
-                        : 'text-white/50 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
+                  <button onClick={() => onNavigate(View.INSPECTION_INCIDENTS)} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${currentView === View.INSPECTION_INCIDENTS ? 'bg-amber-500/30 text-amber-200 font-bold border border-amber-400/30 shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
                     <div className={`w-1.5 h-1.5 rounded-full ${currentView === View.INSPECTION_INCIDENTS ? 'bg-amber-300 animate-pulse' : 'bg-white/30'}`}></div>
                     <span>Reporte de Incidencias</span>
                   </button>
@@ -302,7 +254,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
 
         {canSee(View.DATABASE) && (
           <button onClick={() => onNavigate(View.DATABASE)} className={linkClass(View.DATABASE)}>
-            <div className="p-1.5 rounded-lg bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10">
+            <div className={`p-1.5 rounded-lg ${currentView === View.DATABASE ? 'bg-purple-500/20 text-purple-400' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
               <DatabaseIcon className="w-4 h-4" />
             </div>
             <span className="text-sm font-semibold tracking-tight text-white/80">Archivos Maestros</span>
@@ -321,10 +273,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
 
       <div className="p-4 space-y-4">
         {showInstallButton && (
-          <button
-            onClick={onInstall}
-            className="w-full flex items-center justify-center gap-2 bg-accent/20 hover:bg-accent/40 text-accent-content py-3 rounded-xl transition-all border border-accent/20 group animate-pulse"
-          >
+          <button onClick={onInstall} className="w-full flex items-center justify-center gap-2 bg-accent/20 hover:bg-accent/40 text-accent-content py-3 rounded-xl transition-all border border-accent/20 group animate-pulse">
             <DownloadIcon className="w-4 h-4" />
             <span className="text-xs font-black uppercase tracking-widest">Descargar PWA</span>
           </button>
@@ -344,14 +293,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
                 </div>
               </div>
             </div>
-            <button
-              onClick={onLogout}
-              className="p-2.5 rounded-xl text-white/40 hover:text-danger hover:bg-danger/10 transition-all active:scale-95"
-              title="Finalizar Sesión"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
+            <button onClick={onLogout} className="p-2.5 rounded-xl text-white/40 hover:text-danger hover:bg-danger/10 transition-all active:scale-95" title="Finalizar Sesión">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
             </button>
           </div>
         </div>
