@@ -13,7 +13,8 @@ export enum View {
   POLICIES = 'POLICIES',
   INSPECTION_QUALITY = 'INSPECTION_QUALITY',
   INSPECTION_DASHBOARD = 'INSPECTION_DASHBOARD',
-  INSPECTION_INCIDENTS = 'INSPECTION_INCIDENTS'
+  INSPECTION_INCIDENTS = 'INSPECTION_INCIDENTS',
+  QUALITY_INSPECTION = 'QUALITY_INSPECTION'
 }
 
 export enum UserRole {
@@ -263,6 +264,7 @@ export interface UsaShipmentReport extends BaseDBEntity {
   responsibleId?: string;
   unitType?: string;
   driverName?: string;
+  driverPhone?: string;
   boxNumber?: string;
   tractorPlates?: string;
   caat?: string;
@@ -323,19 +325,4 @@ export interface InspeccionPayload {
   detalles_danos: Record<string, { peso: number; porcentaje: number }>;
   calidad_score: number;
   estatus: string;
-}
-
-export enum View {
-  DASHBOARD = 'DASHBOARD',
-  DATABASE = 'DATABASE',
-  USA_SHIPMENTS = 'USA_SHIPMENTS',
-  TIVE_MAP = 'TIVE_MAP',
-  QUALITY_INSPECTION = 'QUALITY_INSPECTION', // <-- Nueva vista
-  SETTINGS = 'SETTINGS',
-  FREIGHT_PAYMENTS = 'FREIGHT_PAYMENTS',
-  INVENTORY = 'INVENTORY',
-  POLICIES = 'POLICIES',
-  INSPECTION_QUALITY = 'INSPECTION_QUALITY',
-  INSPECTION_DASHBOARD = 'INSPECTION_DASHBOARD',
-  INSPECTION_INCIDENTS = 'INSPECTION_INCIDENTS'
 }

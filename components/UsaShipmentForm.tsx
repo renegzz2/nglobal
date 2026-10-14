@@ -26,6 +26,7 @@ interface TransportUnit {
     lineaId: string;
     unidadId: string;
     driverName: string;
+    driverPhone: string;
     unitType: string;
     tractorPlates: string;
     boxNumber: string;
@@ -191,7 +192,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [loadingResources, setLoadingResources] = useState(false);
 
     const [units, setUnits] = useState<TransportUnit[]>([
-        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', driverPhone: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
     ]);
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
@@ -288,6 +289,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 lineaId: initialData.lineaTransportistaId || '',
                 unidadId: initialData.unidadTransporteId || '',
                 driverName: initialData.driverName || '',
+                driverPhone: initialData.driverPhone || '',
                 unitType: initialData.unitType || '',
                 tractorPlates: initialData.tractorPlates || '',
                 boxNumber: initialData.boxNumber || '',
@@ -326,7 +328,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 secondaryStatus: ''
             });
             setUnits([
-                { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+                { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '',driverPhone: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
             ]);
         }
     }, [initialData, isOpen]);
@@ -556,6 +558,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 ? new Date().toISOString() 
                 : (baseData.departureDateTime ? new Date(baseData.departureDateTime).toISOString() : null),
             driverName: u.driverName,
+            driverPhone: u.driverPhone,
             unitType: u.unitType,
             tractorPlates: u.tractorPlates,
             boxNumber: u.boxNumber,
@@ -911,7 +914,28 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                    )}
                                                 </div>
                                             </div>
-                                            <div><label className={labelClasses}>Nombre del Operador *</label><input type="text" value={unit.driverName} onChange={(e) => handleUnitChange(unit.id, 'driverName', e.target.value.toUpperCase())} className={inputClasses} placeholder="NOMBRE COMPLETO" /></div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className={labelClasses}>Nombre del Operador *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.driverName} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'driverName', e.target.value.toUpperCase())} 
+                                                        className={inputClasses} 
+                                                        placeholder="NOMBRE COMPLETO" 
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Celular del Operador *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.driverPhone} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'driverPhone', e.target.value)} 
+                                                        className={inputClasses} 
+                                                        placeholder="000-000-0000" 
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
                                         <div className="space-y-6">
                                             <div>
