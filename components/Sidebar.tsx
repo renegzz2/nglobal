@@ -53,7 +53,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     }
     if (user.role === UserRole.COORDINADOR) {
       // AQUÍ ESTÁ EL CAMBIO: Se agrega View.DATABASE explícitamente para el Coordinador
-      return [View.DASHBOARD, View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
+      return [View.DASHBOARD, View.LIDER_PROGRAMACION_USA, View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
     }
     if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
       return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
