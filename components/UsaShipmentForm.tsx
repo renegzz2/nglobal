@@ -914,8 +914,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                    )}
                                                 </div>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
+                                            <div className="grid grid-cols-1 gap-4">
+                                                <div className="space-y-4">
                                                     <label className={labelClasses}>Nombre del Operador *</label>
                                                     <input 
                                                         type="text" 
@@ -924,17 +924,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                         className={inputClasses} 
                                                         placeholder="NOMBRE COMPLETO" 
                                                     />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClasses}>Celular del Operador *</label>
-                                                    <input 
-                                                        type="text" 
-                                                        value={unit.driverPhone} 
-                                                        onChange={(e) => handleUnitChange(unit.id, 'driverPhone', e.target.value)} 
-                                                        className={inputClasses} 
-                                                        placeholder="000-000-0000" 
-                                                    />
-                                                </div>
+                                                </div>                                                
                                             </div>
                                         </div>
                                         <div className="space-y-6">
@@ -986,6 +976,18 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div><label className={labelClasses}>Sello Fiscal</label><input type="text" value={unit.sealNumber} onChange={(e) => handleUnitChange(unit.id, 'sealNumber', e.target.value)} className={inputClasses} placeholder="999999" /></div>
                                                 <div><label className={labelClasses}>Tipo Remolque</label><input type="text" value={unit.unitType} onChange={(e) => handleUnitChange(unit.id, 'unitType', e.target.value)} className={inputClasses} disabled /></div>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-4">
+                                                <div className="space-y-4">
+                                                    <label className={labelClasses}>Celular del Operador *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.driverPhone} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'driverPhone', e.target.value)} 
+                                                        className={inputClasses} 
+                                                        placeholder="000-000-0000" 
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

@@ -34,7 +34,8 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
         type: '',
         location: '',
         timestamp: new Date().toISOString(),
-        description: ''
+        description: '',
+        reportedBy: ''
     });
     const [saving, setSaving] = useState(false);
 
@@ -43,6 +44,19 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
             setIncidents(Array.isArray(report.incidents) ? report.incidents : []);
             setIsAdding(false);
             setCurrentStatus(report.logisticStatus);
+            
+            // Tratamos de obtener el nombre del usuario logueado desde localStorage
+            const savedUser = localStorage.getItem('ng_auth_profile');
+            if (savedUser) {
+                try {
+                    const parsedUser = JSON.parse(savedUser);
+                    setNewIncident(prev => ({ ...prev, reportedBy: parsedUser.name || 'USUARIO' }));
+                } catch (e) {
+                    setNewIncident(prev => ({ ...prev, reportedBy: 'USUARIO' }));
+                }
+            } else {
+                setNewIncident(prev => ({ ...prev, reportedBy: 'USUARIO' }));
+            }
         }
     }, [isOpen, report]);
 
@@ -53,7 +67,8 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
         }
 
         setSaving(true);
-        const updatedIncidents = [...incidents, { ...newIncident, timestamp: new Date().toISOString() }];
+        const incidentToSave = { ...newIncident, timestamp: new Date().toISOString() };
+        const updatedIncidents = [...incidents, incidentToSave];
         
         try {
             // Intentar guardado normal
@@ -66,14 +81,14 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
 
             setIncidents(updatedIncidents);
             setIsAdding(false);
-            setNewIncident({ type: '', location: '', timestamp: '', description: '' });
+            setNewIncident(prev => ({ type: '', location: '', timestamp: '', description: '', reportedBy: prev.reportedBy }));
             addNotification({ type: 'success', title: 'Bitácora Actualizada', message: 'La incidencia se ha registrado correctamente.' });
             
             // WHATSAPP_NOTIFICATION_TRIGGER
             try {
                 // Number should be the coordinator's or a fallback
                 const coordinatorPhone = "523312345678"; // Example placeholder
-                await sendWhatsAppText(coordinatorPhone, `🚨 *INCIDENCIA DETECTADA* \n🚢 *Viaje:* ${report.tripId}\n⚠️ *Tipo:* ${newIncident.type}\n📍 *Ubicación:* ${newIncident.location || 'No especificada'}\n📝 *Detalle:* ${newIncident.description}`);
+                await sendWhatsAppText(coordinatorPhone, `🚨 *INCIDENCIA DETECTADA* \n🚢 *Viaje:* ${report.tripId}\n⚠️ *Tipo:* ${incidentToSave.type}\n📍 *Ubicación:* ${incidentToSave.location || 'No especificada'}\n📝 *Detalle:* ${incidentToSave.description}\n👤 *Reportó:* ${incidentToSave.reportedBy}`);
                 console.log("NOTIFICACIÓN_WS_ENVIADA");
             } catch (wsErr) {
                 console.error("Fallo envío WhatsApp:", wsErr);
@@ -132,6 +147,16 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
                                     </select>
                                 </div>
                                 <div>
+                                    <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Ubicación (Opcional)</label>
+                                    <input 
+                                        type="text"
+                                        className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs font-bold outline-none"
+                                        placeholder="Ej. Caseta de cobro..."
+                                        value={newIncident.location || ''}
+                                        onChange={e => setNewIncident({...newIncident, location: e.target.value})}
+                                    />
+                                </div>
+                                <div>
                                     <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Descripción *</label>
                                     <textarea 
                                         className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs font-bold outline-none h-20"
@@ -153,35 +178,48 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
                             </div>
                         </div>
                     ) : (
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                             <button 
                                 onClick={() => setIsAdding(true)}
-                                className="w-full bg-danger text-white py-2.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                                className="w-full bg-danger text-white py-2.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm hover:bg-red-700 transition-colors"
                             >
                                 <PlusIcon className="w-4 h-4" /> Reportar Incidencia
                             </button>
 
-                            {incidents.length === 0 ? (
-                                <div className="py-10 text-center opacity-40 italic text-xs">Sin registros críticos.</div>
-                            ) : (
-                                <div className="space-y-3">
-                                    {[...incidents].reverse().map((inc, i) => (
-                                        <div key={i} className="bg-white p-3 rounded-xl border border-border shadow-sm border-l-4 border-l-danger">
-                                            <div className="flex justify-between items-start mb-1">
-                                                <span className="text-[9px] font-black text-danger uppercase">{inc.type}</span>
-                                                <span className="text-[8px] font-bold text-text-muted">{new Date(inc.timestamp).toLocaleDateString()}</span>
+                            <div>
+                                <h4 className="text-[10px] font-black text-text-muted uppercase tracking-widest mb-3 px-2 border-b border-border pb-2">Historial de Reportes</h4>
+                                {incidents.length === 0 ? (
+                                    <div className="py-8 text-center opacity-40 italic text-xs">Sin registros críticos.</div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {[...incidents].reverse().map((inc, i) => (
+                                            <div key={i} className="bg-white p-4 rounded-xl border border-border shadow-sm border-l-4 border-l-danger">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div>
+                                                        <span className="text-[10px] font-black text-danger uppercase block">{inc.type}</span>
+                                                        <span className="text-[8px] font-bold text-text-muted uppercase">Reportó: {inc.reportedBy || 'USUARIO'}</span>
+                                                    </div>
+                                                    <span className="text-[9px] font-bold text-text-muted bg-surface-secondary px-2 py-0.5 rounded">
+                                                        {new Date(inc.timestamp).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}
+                                                    </span>
+                                                </div>
+                                                {inc.location && (
+                                                    <p className="text-[9px] font-bold text-amber-700 mb-1 flex items-center gap-1">
+                                                        <MapPinIcon className="w-3 h-3" /> {inc.location}
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-text-primary leading-tight mt-1 bg-surface-secondary/50 p-2 rounded-lg">{inc.description}</p>
                                             </div>
-                                            <p className="text-[10px] text-text-secondary leading-tight">{inc.description}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
 
                 <div className="p-4 border-t border-border bg-white flex justify-end shrink-0 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6">
-                    <button onClick={onClose} className="w-full md:w-auto px-6 py-2 rounded-xl font-bold text-xs text-text-secondary hover:bg-hover transition-all">Cerrar</button>
+                    <button onClick={onClose} className="w-full md:w-auto px-6 py-2 rounded-xl font-bold text-xs text-text-secondary hover:bg-hover transition-all border border-border">Cerrar</button>
                 </div>
             </div>
         </div>,

@@ -43,7 +43,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
     const [lineas, setLineas] = useState<LineaTransporteDB[]>([]);
     const [projectProductMap, setProjectProductMap] = useState<Record<string, string[]>>({});
 
-    // ESTADOS PARA EL FILTRO TÉRMICO[cite: 18]
+    // ESTADOS PARA EL FILTRO TÉRMICO
     const [timeFilter, setTimeFilter] = useState<'all' | '24h' | '48h' | 'custom'>('all');
     const [customStart, setCustomStart] = useState<string>('');
     const [customEnd, setCustomEnd] = useState<string>('');
@@ -73,7 +73,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                 ]);
                 setTiveHistory(Array.isArray(history) ? history : []);
                 setDictionary(dict || {});
-                if (alertsRes.data) setDbAlerts(alertsRes.data);
                 if (lineasRes.data) setLineas(toCamelCase(lineasRes.data));
                 
                 if (mapRes.data) {
@@ -209,6 +208,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                 <div style="margin-bottom: 12px;">
                                     <span class="label">Operador</span>
                                     <div class="value">${report.driverName || 'N/A'}</div>
+                                    ${report.driverPhone ? `<div style="font-size: 10px; color: #059669; margin-top: 4px; font-weight: bold;">📞 ${report.driverPhone}</div>` : ''}
                                 </div>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                                     <div><span class="label">CAAT</span><div class="value">${report.caat || 'N/A'}</div></div>
@@ -305,7 +305,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         }
     };
 
-    // MOTOR DE FILTRADO TÉRMICO[cite: 18]
+    // MOTOR DE FILTRADO TÉRMICO
     const filteredChartData = useMemo(() => {
         if (!Array.isArray(tiveHistory) || !tiveHistory.length) return [];
         
@@ -689,9 +689,18 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                             <span className="text-[9px] font-black text-text-muted uppercase tracking-widest">Línea Transportista</span>
                                             <p className="text-sm font-black text-primary uppercase">{formatCarrierName(lineas.find(l => l.id === report.lineaTransportistaId)?.nombre || 'S/A')}</p>
                                         </div>
+                                        {/* AQUI SE AGREGA LA VARIABLE CORRECTA DE REPORT */}
                                         <div className="space-y-1">
                                             <span className="text-[9px] font-black text-text-muted uppercase tracking-widest">Operador a Cargo</span>
                                             <p className="text-sm font-black text-text-primary uppercase">{report.driverName || 'No asignado'}</p>
+                                            {report.driverPhone && (
+                                                <div className="flex items-center gap-1.5 mt-1">
+                                                    <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                                    </svg>
+                                                    <p className="text-[10px] font-bold text-emerald-700">{report.driverPhone}</p>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1">
@@ -785,7 +794,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                 </div>
                             </div>
                             <div className="bg-white p-8 rounded-2xl border border-border h-[450px] shadow-inner relative flex flex-col justify-center">
-                                {/* BOTONERA DE FILTRADO TÉRMICO[cite: 18] */}
+                                {/* BOTONERA DE FILTRADO TÉRMICO */}
                                 <div className="absolute top-4 right-8 z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                                     <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm w-fit">
                                         <button 
@@ -833,7 +842,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                     )}
                                 </div>
 
-                                {/* GRÁFICA TÉRMICA FILTRADA[cite: 18] */}
+                                {/* GRÁFICA TÉRMICA FILTRADA */}
                                 <div className="h-full pt-12">
                                     {filteredChartData && filteredChartData.length > 0 ? (
                                         <ResponsiveContainer width="100%" height="100%">
@@ -892,11 +901,13 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                             <div key={idx} className={`bg-white p-5 rounded-2xl border shadow-sm transition-all hover:shadow-md relative overflow-hidden ${isSystem ? 'border-l-4 border-l-danger border-border' : isDbAlert ? 'border-l-4 border-l-primary border-border' : 'border-l-4 border-l-amber-500 border-amber-100'}`}>
                                                 <div className="flex justify-between items-start mb-3">
                                                     <div className="flex items-center gap-2">
-                                                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${isSystem ? 'bg-danger text-white' : isDbAlert ? 'bg-primary text-white' : 'bg-amber-500 text-white'}`}>
-                                                            {isSystem ? 'SISTEMA' : isDbAlert ? 'OBSERVACIÓN' : 'OPERATIVO'}
+                                                        {/* NUEVO: Mostrar la etiqueta de quien reportó */}
+                                                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest flex items-center gap-1 ${isSystem ? 'bg-danger text-white' : isDbAlert ? 'bg-primary text-white' : 'bg-amber-500 text-white'}`}>
+                                                            {isSystem ? 'SISTEMA' : isDbAlert ? 'OBSERVACIÓN' : (evt.reportedBy || 'USUARIO')}
                                                         </span>
                                                         <h4 className="font-black text-sm text-text-primary uppercase tracking-tight">
-                                                            {isSystem ? (dictionary[evt.alert_type]?.display_name || evt.alert_type) : isDbAlert ? (evt.alert_type === 'COMENTARIO_OPERADOR' ? 'Comentario de Panel' : evt.alert_type) : evt.type}
+                                                            {/* NUEVO: Título de incidencia para las capturas manuales */}
+                                                            {isSystem ? (dictionary[evt.alert_type]?.display_name || evt.alert_type) : isDbAlert ? (evt.alert_type === 'COMENTARIO_OPERADOR' ? 'Comentario de Panel' : evt.alert_type) : 'INCIDENCIA'}
                                                         </h4>
                                                     </div>
                                                     <span className="text-[10px] font-bold text-text-muted bg-surface-secondary px-2 py-0.5 rounded shadow-inner">{formatFullSafeDate(evt.timestamp)}</span>
@@ -907,6 +918,11 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                                 {isDbAlert && evt.comment && evt.message && evt.alert_type !== 'COMENTARIO_OPERADOR' && (
                                                     <p className="mt-2 text-[10px] text-text-muted italic border-t border-border pt-2">Ref: {evt.message}</p>
                                                 )}
+                                                {isOperator && evt.location && (
+                                                    <p className="mt-2 text-[10px] text-amber-700 italic border-t border-amber-100 pt-2">
+                                                        <strong>Tipo:</strong> {evt.type} | <strong>Ubicación:</strong> {evt.location}
+                                                    </p>
+                                                )}
                                             </div>
                                         ); 
                                     })}
@@ -916,7 +932,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                     )}
                 </div>
 
-                <div className="p-6 border-t border-border bg-white flex justify-end gap-3 shrink-0 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-6">
+                <div className="p-6 border-t border-border bg-white flex justify-end gap-3 shrink-0 pb-[calc(1rem+env(safe-area-bottom))] md:pb-6">
                     <button onClick={onClose} className="px-6 py-2.5 rounded-xl border border-border font-bold text-text-secondary hover:bg-hover transition-all text-sm">Cerrar</button>
                     {currentStatus !== 'Finalizado' && (
                         <button onClick={() => onCompleteTrip(report.id)} className="px-8 py-2.5 rounded-xl bg-success text-white font-black text-xs uppercase tracking-widest hover:bg-green-700 shadow-lg">Finalizar Viaje</button>

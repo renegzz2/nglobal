@@ -236,6 +236,7 @@ export interface Incident {
   location: string;
   timestamp: string;
   description: string;
+  reportedBy?: string;
 }
 
 export interface UsaShipmentReport extends BaseDBEntity {
