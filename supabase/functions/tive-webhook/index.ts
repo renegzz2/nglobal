@@ -60,7 +60,7 @@ async function enviarWhatsApp(supabase: any, templateName: string, params: strin
                     language: { code: "es_MX" }, 
                     components: [{ 
                         type: "body", 
-                        // Aquí ocurre la magia: el arreglo de 8 variables se mapea a {{1}} ... {{8}}
+                        // El arreglo de 9 variables se mapea a {{1}} ... {{9}}
                         parameters: cleanParams 
                     }]
                 }
@@ -140,7 +140,9 @@ async function getRichData(supabase: any, tripRecord: any) {
         clientName,
         productDetails,
         carrierName,
-        driverName: tripRecord?.driver_name || 'S/D'
+        driverName: tripRecord?.driver_name || 'S/D',
+        // NUEVA LÍNEA DE CÓDIGO: Capturamos el celular del operador
+        driverPhone: tripRecord?.driver_phone || 'S/D' 
     };
 }
 
@@ -179,7 +181,7 @@ serve(async (req) => {
         
         const richData = await getRichData(supabase, payload.record);
         
-        // Orden exacto de las variables {{1}} a la {{8}} en Meta
+        // Orden exacto de las variables {{1}} a la {{9}} en Meta
         const templateParams = [
             richData.tripId,          // {{1}}
             richData.invoiceNumbers,  // {{2}}
@@ -188,11 +190,12 @@ serve(async (req) => {
             richData.carrierName,     // {{5}}
             richData.driverName,      // {{6}}
             motivoTexto,              // {{7}}
-            baseDetails               // {{8}}
+            baseDetails,              // {{8}}
+            richData.driverPhone      // {{9}} -> El teléfono del operador
         ];
 
-        // NOTA: Si tu plantilla en Meta se llama distinto, cámbialo aquí abajo
-        await enviarWhatsApp(supabase, "alerta_despacho_v2", templateParams);
+        // Cambiamos al nombre de tu nueva plantilla V3
+        await enviarWhatsApp(supabase, "alerta_despacho_v3", templateParams);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
@@ -215,7 +218,7 @@ serve(async (req) => {
     if (!activeTrip) return new Response(JSON.stringify({ success: true }), { status: 200 });
 
     if (alertType !== 'normal' && alertType !== 'ping' || hasAlertObject) {
-        console.log(`⚠️️ ALERTA DETECTADA [Tracker: ${trackerId}]: ${alertType}`);
+        console.log(`⚠ ALERTA DETECTADA [Tracker: ${trackerId}]: ${alertType}`);
     }
 
     const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
@@ -263,7 +266,7 @@ serve(async (req) => {
 
     const richData = await getRichData(supabase, activeTrip);
     
-    // Orden exacto de las variables {{1}} a la {{8}} en Meta
+    // Orden exacto de las variables {{1}} a la {{9}} en Meta
     const templateParams = [
         richData.tripId,          // {{1}}
         richData.invoiceNumbers,  // {{2}}
@@ -272,11 +275,12 @@ serve(async (req) => {
         richData.carrierName,     // {{5}}
         richData.driverName,      // {{6}}
         motivoTexto,              // {{7}}
-        baseDetails               // {{8}}
+        baseDetails,              // {{8}}
+        richData.driverPhone      // {{9}} -> El teléfono del operador
     ];
 
-    // NOTA: Si tu plantilla en Meta se llama distinto, cámbialo aquí abajo
-    await enviarWhatsApp(supabase, "alerta_despacho_v2", templateParams);
+    // Cambiamos al nombre de tu nueva plantilla V3
+    await enviarWhatsApp(supabase, "alerta_despacho_v3", templateParams);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
 
   } catch (error) {
