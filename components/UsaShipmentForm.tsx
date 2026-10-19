@@ -197,6 +197,37 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
 
+    // NUEVA FUNCIÓN: Motor calculador de promedios térmicos según los productos en el viaje
+    const calculateThermalAverages = (productsToEval: AuditProduct[]) => {
+        if (productsToEval.length === 0) return { min: '45.0', max: '51.0' };
+
+        let sumMin = 0;
+        let sumMax = 0;
+        let count = 0;
+
+        productsToEval.forEach(p => {
+            const spec = productSpecs.find(s => s.id === p.productId);
+            if (spec) {
+                const prodMin = Number(spec.limiteTolerable ?? (spec.tempOptima ? spec.tempOptima - 3 : 45.0));
+                const prodMax = Number(spec.limiteSuperior ?? 51.0);
+                
+                if (!isNaN(prodMin) && !isNaN(prodMax)) {
+                    sumMin += prodMin;
+                    sumMax += prodMax;
+                    count++;
+                }
+            }
+        });
+
+        if (count > 0) {
+            return {
+                min: (sumMin / count).toFixed(1),
+                max: (sumMax / count).toFixed(1)
+            };
+        }
+        return { min: '45.0', max: '51.0' };
+    };
+
     useEffect(() => {
         const fetchResources = async () => {
             setLoadingResources(true);
@@ -338,29 +369,22 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const lote = pendingLots.find(l => l.id === loteId);
         if (!lote) return;
 
-        // =================================================================
         // MOTOR DE VALIDACIÓN TÉRMICA PARA CONSOLIDACIÓN (MULTICLIENTE/LTL)
-        // =================================================================
         if (baseData.lotesAsociados.length > 0) {
-            // 1. Extraemos la configuración térmica actual del camión
             const currentMin = parseFloat(units[0].minTemperature);
             const currentMax = parseFloat(units[0].temperature);
 
             let isCompatible = true;
             let conflictingProduct = '';
 
-            // 2. Evaluamos cada producto del nuevo lote a ingresar
             for (const p of (lote.productos || [])) {
                 const prodId = p.productId || p.product_id;
                 const spec = productSpecs.find(s => s.id === prodId);
                 
                 if (spec) {
-                    // Usamos tus columnas exactas de types.ts
-                    // Limite Tolerable (Mínima) y Limite Superior (Máxima)
                     const prodMin = Number(spec.limiteTolerable ?? (spec.tempOptima ? spec.tempOptima - 3 : 45.0));
                     const prodMax = Number(spec.limiteSuperior ?? 51.0);
 
-                    // 3. Verificamos si el rango del camión choca con los límites seguros del producto
                     if (currentMin < prodMin || currentMax > prodMax) {
                         isCompatible = false;
                         conflictingProduct = spec.nombreDelProducto || 'Producto Especial';
@@ -369,7 +393,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 }
             }
 
-            // 4. Detonamos la alerta en pantalla si son incompatibles
             if (!isCompatible) {
                 const confirmed = window.confirm(
                     `⚠️ ADVERTENCIA DE INCOMPATIBILIDAD TÉRMICA ⚠️\n\n` +
@@ -377,11 +400,9 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                     `¿Estás absolutamente seguro de forzar la consolidación de este viaje?`
                 );
                 
-                // Si el usuario cancela, no agregamos el lote
                 if (!confirmed) return; 
             }
         }
-        // =================================================================
 
         const newProducts = (lote.productos || []).map((p: any) => ({
             ...p,
@@ -398,21 +419,26 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const newLotes = [...baseData.lotesAsociados, lote.id];
         const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
         const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
+        const allProducts = [...baseData.products, ...newProducts];
+        
+        // Recalcular promedios térmicos automáticos
+        const thermalAverages = calculateThermalAverages(allProducts);
 
         setBaseData(prev => ({
             ...prev,
             lotesAsociados: newLotes,
             project: newProjectName,
-            products: [...prev.products, ...newProducts],
+            products: allProducts,
             departureDateTime: prev.lotesAsociados.length === 0 ? toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`) : prev.departureDateTime,
-            temperatureIdeal: prev.lotesAsociados.length === 0 ? (lote.temperaturaIdeal || null) : prev.temperatureIdeal,
+            temperatureIdeal: ((Number(thermalAverages.min) + Number(thermalAverages.max)) / 2).toFixed(1),
         }));
 
-        const newTotal = [...baseData.products, ...newProducts].reduce((acc, p) => acc + Number(p.realQty), 0);
+        const newTotal = allProducts.reduce((acc, p) => acc + Number(p.realQty), 0);
         setUnits(prev => prev.map(u => ({ 
             ...u, 
             totalRealBoxes: String(newTotal),
-            temperature: baseData.lotesAsociados.length === 0 ? String(lote.temperaturaIdeal || '48.2') : u.temperature 
+            minTemperature: thermalAverages.min,
+            temperature: thermalAverages.max 
         })));
         
         addNotification({ type: 'success', title: 'Lote Añadido', message: `Carga de ${lote.proyecto} integrada al viaje.` });
@@ -423,16 +449,24 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
         const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
         const newProducts = baseData.products.filter(p => p.sourceLotId !== loteId);
+        const thermalAverages = calculateThermalAverages(newProducts);
 
         setBaseData(prev => ({
             ...prev,
             lotesAsociados: newLotes,
             project: newProjectName,
-            products: newProducts
+            products: newProducts,
+            temperatureIdeal: ((Number(thermalAverages.min) + Number(thermalAverages.max)) / 2).toFixed(1)
         }));
 
         const newTotal = newProducts.reduce((acc, p) => acc + Number(p.realQty), 0);
-        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
+        setUnits(prev => prev.map(u => ({ 
+            ...u, 
+            totalRealBoxes: String(newTotal),
+            minTemperature: thermalAverages.min,
+            temperature: thermalAverages.max
+        })));
+        
         addNotification({ type: 'warning', title: 'Lote Removido', message: 'Se ha desvinculado la carga y sus productos correspondientes.' });
     };
 
@@ -494,7 +528,22 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             }
             return updated;
         });
-        setBaseData(prev => ({ ...prev, products: updatedProducts }));
+        
+        let newTemperatureIdeal = baseData.temperatureIdeal;
+        
+        // Si cambian el producto, recalculamos los promedios térmicos
+        if (field === 'productId') {
+            const thermalAverages = calculateThermalAverages(updatedProducts);
+            newTemperatureIdeal = ((Number(thermalAverages.min) + Number(thermalAverages.max)) / 2).toFixed(1);
+            setUnits(prev => prev.map(u => ({
+                ...u,
+                minTemperature: thermalAverages.min,
+                temperature: thermalAverages.max
+            })));
+        }
+
+        setBaseData(prev => ({ ...prev, products: updatedProducts, temperatureIdeal: newTemperatureIdeal }));
+        
         if (field === 'realQty') {
             const newTotal = updatedProducts.reduce((acc, curr) => acc + (Number(curr.realQty) || 0), 0);
             setUnits(units.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
@@ -519,9 +568,21 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
 
     const handleRemoveProduct = (id: string) => {
         const updatedProducts = baseData.products.filter(p => (p as any).id !== id);
-        setBaseData(prev => ({ ...prev, products: updatedProducts }));
+        const thermalAverages = calculateThermalAverages(updatedProducts);
+
+        setBaseData(prev => ({ 
+            ...prev, 
+            products: updatedProducts,
+            temperatureIdeal: ((Number(thermalAverages.min) + Number(thermalAverages.max)) / 2).toFixed(1)
+        }));
+        
         const newTotal = updatedProducts.reduce((acc, curr) => acc + (Number(curr.realQty) || 0), 0);
-        setUnits(units.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
+        setUnits(units.map(u => ({ 
+            ...u, 
+            totalRealBoxes: String(newTotal),
+            minTemperature: thermalAverages.min,
+            temperature: thermalAverages.max 
+        })));
     };
 
     const handleAction = async (forcedStatus: string | null) => {
@@ -573,7 +634,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             arrivalDateTime: baseData.arrivalDateTime ? new Date(baseData.arrivalDateTime).toISOString() : null,
             comments: (() => {
                 let comm = initialData?.comments || '';
-                comm = comm.replace(/\[HOLD\]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
+                comm = comm.replace(/[HOLD]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
                 let tags = '';
                 if (baseData.secondaryStatus === 'Hold') tags += '[HOLD] ';
                 if (u.freightCostMxn) tags += `[MXN:${u.freightCostMxn}] `;
@@ -914,8 +975,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                    )}
                                                 </div>
                                             </div>
-                                            <div className="grid grid-cols-1 gap-4">
-                                                <div className="space-y-4">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
                                                     <label className={labelClasses}>Nombre del Operador *</label>
                                                     <input 
                                                         type="text" 
@@ -924,7 +985,17 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                         className={inputClasses} 
                                                         placeholder="NOMBRE COMPLETO" 
                                                     />
-                                                </div>                                                
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Celular del Operador *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.driverPhone} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'driverPhone', e.target.value)} 
+                                                        className={inputClasses} 
+                                                        placeholder="000-000-0000" 
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="space-y-6">
@@ -976,18 +1047,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div><label className={labelClasses}>Sello Fiscal</label><input type="text" value={unit.sealNumber} onChange={(e) => handleUnitChange(unit.id, 'sealNumber', e.target.value)} className={inputClasses} placeholder="999999" /></div>
                                                 <div><label className={labelClasses}>Tipo Remolque</label><input type="text" value={unit.unitType} onChange={(e) => handleUnitChange(unit.id, 'unitType', e.target.value)} className={inputClasses} disabled /></div>
-                                            </div>
-                                            <div className="grid grid-cols-1 gap-4">
-                                                <div className="space-y-4">
-                                                    <label className={labelClasses}>Celular del Operador *</label>
-                                                    <input 
-                                                        type="text" 
-                                                        value={unit.driverPhone} 
-                                                        onChange={(e) => handleUnitChange(unit.id, 'driverPhone', e.target.value)} 
-                                                        className={inputClasses} 
-                                                        placeholder="000-000-0000" 
-                                                    />
-                                                </div>
                                             </div>
                                         </div>
                                     </div>
