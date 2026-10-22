@@ -60,7 +60,6 @@ async function enviarWhatsApp(supabase: any, templateName: string, params: strin
                     language: { code: "es_MX" }, 
                     components: [{ 
                         type: "body", 
-                        // El arreglo de 9 variables se mapea a {{1}} ... {{9}}
                         parameters: cleanParams 
                     }]
                 }
@@ -141,7 +140,6 @@ async function getRichData(supabase: any, tripRecord: any) {
         productDetails,
         carrierName,
         driverName: tripRecord?.driver_name || 'S/D',
-        // NUEVA LÍNEA DE CÓDIGO: Capturamos el celular del operador
         driverPhone: tripRecord?.driver_phone || 'S/D' 
     };
 }
@@ -191,7 +189,7 @@ serve(async (req) => {
             richData.driverName,      // {{6}}
             motivoTexto,              // {{7}}
             baseDetails,              // {{8}}
-            richData.driverPhone      // {{9}} -> El teléfono del operador
+            richData.driverPhone      // {{9}}
         ];
 
         // Cambiamos al nombre de tu nueva plantilla V3

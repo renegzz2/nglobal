@@ -10,11 +10,12 @@ import Badge from './ui/Badge';
 import DataTable, { Column } from './ui/DataTable';
 import ShipmentCardView from './ShipmentCardView';
 import StaffOnDuty from './StaffOnDuty';
-import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, BoxIcon, TruckIcon, SwitchHorizontalIcon, ExclamationIcon, DatabaseIcon, ClockIcon, UserIcon, PhoneIcon, LayoutGridIcon, TableIcon, MapPinIcon } from './icons';
+import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, BoxIcon, TruckIcon, SwitchHorizontalIcon, ExclamationIcon, DatabaseIcon, ClockIcon, UserIcon, PhoneIcon, LayoutGridIcon, TableIcon, MapPinIcon, XIcon } from './icons';
 import { useNotification } from './NotificationProvider';
 import { useTiveMonitoring } from './TiveMonitoringProvider';
 import { formatCarrierName, toCamelCase, toSnakeCase } from '../utils/formatters';
 import { TableSkeleton } from './ui/Skeleton';
+import { getTiveHistory } from '../services/tiveService';
 
 interface UsaShipmentReportPageProps {
     initialView?: 'active' | 'completed';
@@ -67,6 +68,13 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
     const [displayMode, setDisplayMode] = useState<'table' | 'cards'>('table');
 
     const [pendingLoads, setPendingLoads] = useState<Record<string, number>>({});
+    
+    // ESTADOS PARA EXPORTACIÓN
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [exportStartDate, setExportStartDate] = useState('');
+    const [exportEndDate, setExportEndDate] = useState('');
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportProgress, setExportProgress] = useState(0);
     
     // ESTADO Y LÓGICA PARA COLUMNAS DINÁMICAS
     const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
@@ -166,24 +174,29 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         return days;
     }, [pendingLoads]);
 
+    // NUEVO FILTRO: Solo mostrar datos del año en curso en las tablas
+    const currentYear = new Date().getFullYear();
+
     const unifiedActiveData = useMemo(() => {
         return reports.filter(r => {
             const st = (r.logisticStatus || '').toLowerCase();
-            return st !== 'finalizado' && st !== 'cancelado';
+            const dateObj = new Date(r.realDepartureDate || r.departureDateTime || r.created_at || new Date());
+            return st !== 'finalizado' && st !== 'cancelado' && dateObj.getFullYear() === currentYear;
         });
-    }, [reports]);
+    }, [reports, currentYear]);
 
     const filteredData = useMemo(() => {
         let base = view === 'active' ? unifiedActiveData : reports.filter(r => {
             const st = (r.logisticStatus || '').toLowerCase();
-            return st === 'finalizado' || st === 'cancelado';
+            const dateObj = new Date(r.realDepartureDate || r.departureDateTime || r.created_at || new Date());
+            return (st === 'finalizado' || st === 'cancelado') && dateObj.getFullYear() === currentYear;
         });
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
             base = base.filter(r => (r.tripId || '').toLowerCase().includes(q) || (r.project || '').toLowerCase().includes(q) || (r.driverName || '').toLowerCase().includes(q));
         }
         return base;
-    }, [unifiedActiveData, reports, view, searchQuery]);
+    }, [unifiedActiveData, reports, view, searchQuery, currentYear]);
 
     const pendingRatingsCount = useMemo(() => {
         return reports.filter(r => r.ratingPending === true).length;
@@ -370,6 +383,150 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             fetchData();
         } catch (e) {
             addNotification({ type: 'danger', title: 'Error', message: 'No se pudo guardar la calificación.' });
+        }
+    };
+
+    // FUNCIÓN DE EXPORTACIÓN A CSV
+    const handleExportCSV = async () => {
+        if (!exportStartDate || !exportEndDate) {
+            addNotification({ type: 'warning', title: 'Fechas requeridas', message: 'Seleccione rango de fechas.' });
+            return;
+        }
+        
+        setIsExporting(true);
+        setExportProgress(0);
+
+        try {
+            const start = new Date(exportStartDate).getTime();
+            // Ajustamos la fecha de fin para que cubra todo el día (23:59:59)
+            const end = new Date(exportEndDate).setHours(23, 59, 59, 999);
+
+            // Filtramos DE TODOS LOS REPORTES (sin importar el año) por el rango de fechas
+            const toExport = reports.filter(r => {
+                const d = new Date(r.realDepartureDate || r.departureDateTime || r.created_at || new Date()).getTime();
+                return d >= start && d <= end;
+            });
+
+            if (toExport.length === 0) {
+                addNotification({ type: 'info', title: 'Sin datos', message: 'No hay viajes finalizados en este rango de fechas.' });
+                setIsExporting(false);
+                return;
+            }
+
+            let csvContent = "ID VIAJE,PRODUCTOS,PUNTO ORIGEN,PUNTO DESTINO,CLIENTES,LINEA TRANSPORTISTA,NOMBRE OPERADOR,NUMERO TELEFONO DE OPERADOR,TIEMPO EN TRANSITO (HRS),CUMPLIMIENTO DE RUTA,EXPOSICION TERMICA (HRS FUERA RANGO),SALIDA REAL,LLEGADA REAL,INCIDENCIAS REPORTADAS\n";
+
+            for (let i = 0; i < toExport.length; i++) {
+                const r = toExport[i];
+                
+                // Actualizar barra de progreso (visual)
+                setExportProgress(Math.round(((i + 1) / toExport.length) * 100));
+
+                const origin = r.project || 'S/D';
+                
+                let clientsStr = 'S/D';
+                if (r.clientIds && r.clientIds.length > 0) {
+                    clientsStr = r.clientIds.map(cid => clientes.find(c => c.id === cid)?.nombre).filter(Boolean).join(' | ');
+                } else if (r.clientId) {
+                    clientsStr = clientes.find(c => c.id === r.clientId)?.nombre || 'S/D';
+                }
+                const destination = clientsStr;
+
+                const carrier = formatCarrierName(lineas.find(l => l.id === r.lineaTransportistaId)?.nombre) || 'S/D';
+                
+                const productsStr = r.products?.map((p: any) => productSpecs.find(s => s.id === (p.productId || p.product_id))?.nombreDelProducto || p.manualProductName || p.manual_product_name).filter(Boolean).join(' | ') || 'S/D';
+
+                const depDate = r.realDepartureDate ? new Date(r.realDepartureDate) : null;
+                const arrDate = r.arrivalDateTime ? new Date(r.arrivalDateTime) : null;
+                
+                let transitHours = 0;
+                if (depDate && arrDate) {
+                    transitHours = (arrDate.getTime() - depDate.getTime()) / (1000 * 60 * 60);
+                }
+
+                // Cálculo Dinámico de Telemetría Tive para el reporte
+                let hoursOutOfRange = 0;
+                let routeCompliance = "DENTRO DE PARAMETROS";
+                
+                if (r.tiveTrackerId) {
+                    try {
+                        const history = await getTiveHistory(r.tiveTrackerId.trim());
+                        if (Array.isArray(history) && history.length > 1) {
+                            const mainPid = r.products?.[0]?.productId || r.products?.[0]?.product_id;
+                            const mainSpec = productSpecs.find(s => s.id === mainPid);
+                            
+                            const min = Number(r.min_temp || (mainSpec?.tempOptima ? Number(mainSpec.tempOptima) - 3 : 45.0));
+                            const max = Number(r.temperature || r.idealTemp || mainSpec?.limiteSuperior || 51.0);
+
+                            for (let j = 0; j < history.length - 1; j++) {
+                                const current = history[j];
+                                const next = history[j + 1];
+                                if (current.temperature && (current.temperature < min || current.temperature > max)) {
+                                    const duration = (new Date(current.timestamp).getTime() - new Date(next.timestamp).getTime()) / (1000 * 60 * 60);
+                                    hoursOutOfRange += Math.abs(duration);
+                                }
+                            }
+                        }
+                    } catch(e) {
+                        // Ignorar errores de un tracker individual para no frenar la exportación masiva
+                    }
+                }
+
+                if (transitHours > 0 && (hoursOutOfRange / transitHours >= 0.05)) {
+                    routeCompliance = "DESVIACION DETECTADA";
+                }
+
+                // Formateo de Incidencias
+                let incidentsStr = 'Ninguna';
+                if (r.incidents) {
+                    let parsedIncidents = [];
+                    if (Array.isArray(r.incidents)) parsedIncidents = r.incidents;
+                    else if (typeof r.incidents === 'string') {
+                        try { parsedIncidents = JSON.parse(r.incidents); } catch(e){}
+                    }
+                    if (parsedIncidents.length > 0) {
+                        incidentsStr = parsedIncidents.map((inc: any) => inc.type).join(' | ');
+                    }
+                }
+
+                const escapeCSV = (str: any) => `"${String(str || '').replace(/"/g, '""')}"`;
+
+                const row = [
+                    escapeCSV(r.tripId),
+                    escapeCSV(productsStr),
+                    escapeCSV(origin),
+                    escapeCSV(destination),
+                    escapeCSV(clientsStr),
+                    escapeCSV(carrier),
+                    escapeCSV(r.driverName),
+                    escapeCSV(r.driverPhone),
+                    transitHours.toFixed(2),
+                    escapeCSV(routeCompliance),
+                    hoursOutOfRange.toFixed(2),
+                    escapeCSV(depDate ? depDate.toLocaleString('es-MX') : 'S/D'),
+                    escapeCSV(arrDate ? arrDate.toLocaleString('es-MX') : 'S/D'),
+                    escapeCSV(incidentsStr)
+                ];
+
+                csvContent += row.join(",") + "\n";
+            }
+
+            // Descargar Archivo
+            const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Exportacion_Viajes_${exportStartDate}_a_${exportEndDate}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            setIsExportModalOpen(false);
+            addNotification({ type: 'success', title: 'Exportación Exitosa', message: `Se exportaron ${toExport.length} viajes con datos térmicos calculados.` });
+        } catch (err) {
+            console.error("Export Error:", err);
+            addNotification({ type: 'danger', title: 'Error de Exportación', message: 'Ocurrió un error al generar el archivo CSV.' });
+        } finally {
+            setIsExporting(false);
         }
     };
 
@@ -725,6 +882,17 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                         </button>
                     </div>
 
+                    {/* BOTÓN DE EXPORTACIÓN (Solo visible en Historial) */}
+                    {view === 'completed' && (
+                        <button
+                            onClick={() => setIsExportModalOpen(true)}
+                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 transition-all shadow-sm active:scale-95"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            Exportar Historial
+                        </button>
+                    )}
+
                     {/* SELECTOR DE COLUMNAS DINÁMICO */}
                     {displayMode === 'table' && (
                         <div className="relative" ref={columnSelectorRef}>
@@ -793,7 +961,7 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                         onRowClick={handleOpenDetailsModal}
                         onReorder={handleReorder}
                         rowStyle={getRowStyle}
-                        emptyMessage="Sin movimientos registrados en este segmento."
+                        emptyMessage="Sin movimientos registrados en este segmento o año en curso."
                     />
                 ) : (
                     <ShipmentCardView
@@ -811,6 +979,72 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
                     />
                 )}
             </div>
+
+            {/* MODAL PARA EXPORTAR HISTORIAL A CSV */}
+            {isExportModalOpen && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-border animate-slide-up overflow-hidden">
+                        <div className="p-6 bg-emerald-50 border-b border-emerald-100 flex justify-between items-center">
+                            <h3 className="text-sm font-black text-emerald-800 uppercase tracking-widest flex items-center gap-2">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                Exportar Historial
+                            </h3>
+                            {!isExporting && (
+                                <button onClick={() => setIsExportModalOpen(false)} className="p-1 hover:bg-emerald-100 rounded-full transition-colors"><XIcon className="w-5 h-5 text-emerald-700"/></button>
+                            )}
+                        </div>
+                        <div className="p-6 space-y-5">
+                            <p className="text-xs font-bold text-text-secondary leading-relaxed">
+                                Seleccione el rango de fechas de los despachos que desea exportar. Se generará un reporte avanzado con telemetría Tive calculada.
+                            </p>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-[10px] font-black text-text-muted mb-1.5 uppercase tracking-widest">Fecha Inicio</label>
+                                    <input 
+                                        type="date" 
+                                        value={exportStartDate}
+                                        onChange={(e) => setExportStartDate(e.target.value)}
+                                        disabled={isExporting}
+                                        className="w-full bg-gray-50 border border-border rounded-xl px-3 py-2 text-xs font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-text-muted mb-1.5 uppercase tracking-widest">Fecha Fin</label>
+                                    <input 
+                                        type="date" 
+                                        value={exportEndDate}
+                                        onChange={(e) => setExportEndDate(e.target.value)}
+                                        disabled={isExporting}
+                                        className="w-full bg-gray-50 border border-border rounded-xl px-3 py-2 text-xs font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all"
+                                    />
+                                </div>
+                            </div>
+                            
+                            {isExporting && (
+                                <div className="space-y-2 mt-4">
+                                    <div className="flex justify-between text-[10px] font-black uppercase text-emerald-700">
+                                        <span>Procesando Telemetría...</span>
+                                        <span>{exportProgress}%</span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                                        <div className="bg-emerald-500 h-2 rounded-full transition-all duration-300" style={{ width: `${exportProgress}%` }}></div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-6 bg-gray-50 border-t border-border flex justify-end gap-3">
+                            <button onClick={() => setIsExportModalOpen(false)} disabled={isExporting} className="px-5 py-2 text-[10px] font-black uppercase text-text-muted disabled:opacity-50">Cancelar</button>
+                            <button 
+                                onClick={handleExportCSV} 
+                                disabled={isExporting || !exportStartDate || !exportEndDate} 
+                                className="px-6 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-500/30 hover:bg-emerald-700 transition-all flex items-center gap-2 disabled:opacity-50"
+                            >
+                                {isExporting ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Descargar CSV'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {isFormOpen && <UsaShipmentForm isOpen={isFormOpen} onClose={handleCloseForm} onSubmit={handleSubmit} initialData={reports.find(r => r.id === selectedReportId) || null} productSpecs={productSpecs} proyectos={proyectos} logisticStatuses={logisticStatuses} clientes={clientes} tiposUnidad={tiposUnidad} escalas={escalas} responsables={responsables} />}
             {isDetailsModalOpen && <ShipmentDetailsModal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} report={reports.find(r => r.id === reportIdForDetails)!} productSpecs={productSpecs} proyectos={proyectos} clientes={clientes} logisticStatuses={logisticStatuses} onCompleteTrip={setReportToComplete} onRefresh={fetchData} />}
