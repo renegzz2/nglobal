@@ -197,7 +197,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
 
-    // NUEVA FUNCIÓN: Motor calculador de promedios térmicos según los productos en el viaje
     const calculateThermalAverages = (productsToEval: AuditProduct[]) => {
         if (productsToEval.length === 0) return { min: '45.0', max: '51.0' };
 
@@ -275,7 +274,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 if (initialData.loteSecundarioId) initialLotes.push(initialData.loteSecundarioId);
             }
 
-            // Sincronización robusta de consignatarios / multicliente
             let initialClientIds: string[] = [];
             if (initialData.clientIds && Array.isArray(initialData.clientIds) && initialData.clientIds.length > 0) {
                 initialClientIds = initialData.clientIds;
@@ -341,7 +339,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 isNew: false
             }]);
         } else {
-            // Reiniciar estado limpio para nuevo viaje
             setBaseData({
                 tripId: '',
                 project: '',
@@ -369,7 +366,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const lote = pendingLots.find(l => l.id === loteId);
         if (!lote) return;
 
-        // MOTOR DE VALIDACIÓN TÉRMICA PARA CONSOLIDACIÓN (MULTICLIENTE/LTL)
         if (baseData.lotesAsociados.length > 0) {
             const currentMin = parseFloat(units[0].minTemperature);
             const currentMax = parseFloat(units[0].temperature);
@@ -421,7 +417,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
         const allProducts = [...baseData.products, ...newProducts];
         
-        // Recalcular promedios térmicos automáticos
         const thermalAverages = calculateThermalAverages(allProducts);
 
         setBaseData(prev => ({
@@ -531,7 +526,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         
         let newTemperatureIdeal = baseData.temperatureIdeal;
         
-        // Si cambian el producto, recalculamos los promedios térmicos
         if (field === 'productId') {
             const thermalAverages = calculateThermalAverages(updatedProducts);
             newTemperatureIdeal = ((Number(thermalAverages.min) + Number(thermalAverages.max)) / 2).toFixed(1);
@@ -590,8 +584,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             addNotification({ type: 'danger', title: 'Atención', message: 'Debe definir el Folio de Viaje oficial.' });
             return;
         }
-        if (baseData.projectId === MANUAL_PROJECT_OPTION && !baseData.project.trim()) {
-            addNotification({ type: 'danger', title: 'Atención', message: 'Debe capturar el nombre del proyecto manual.' });
+        if (!baseData.projectId || (baseData.projectId === MANUAL_PROJECT_OPTION && !baseData.project.trim())) {
+            addNotification({ type: 'danger', title: 'Atención', message: 'Debe seleccionar o capturar la sede de origen / proyecto.' });
             return;
         }
         const targetStatus = forcedStatus || units[0].logisticStatus || 'Confirmado';
@@ -634,7 +628,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             arrivalDateTime: baseData.arrivalDateTime ? new Date(baseData.arrivalDateTime).toISOString() : null,
             comments: (() => {
                 let comm = initialData?.comments || '';
-                comm = comm.replace(/[HOLD]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
+                comm = comm.replace(/\[HOLD\]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
                 let tags = '';
                 if (baseData.secondaryStatus === 'Hold') tags += '[HOLD] ';
                 if (u.freightCostMxn) tags += `[MXN:${u.freightCostMxn}] `;
@@ -733,15 +727,34 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                            <label className={labelClasses}>Sede de Origen / Proyecto</label>
-                                            <input
-                                                type="text"
-                                                value={baseData.project}
-                                                onChange={(e) => setBaseData({ ...baseData, project: e.target.value.toUpperCase(), projectId: MANUAL_PROJECT_OPTION })}
-                                                className={inputClasses}
-                                                placeholder="Nombre consolidado del proyecto"
-                                                required
-                                            />
+                                            <label className={labelClasses}>Sede de Origen / Proyecto *</label>
+                                            {baseData.lotesAsociados.length > 0 ? (
+                                                <input
+                                                    type="text"
+                                                    value={baseData.project}
+                                                    readOnly
+                                                    className={`${inputClasses} bg-surface-secondary/50 text-text-muted cursor-not-allowed border-dashed`}
+                                                    title="Nombre autogenerado por los lotes seleccionados"
+                                                />
+                                            ) : (
+                                                <select
+                                                    value={baseData.projectId || ''}
+                                                    onChange={(e) => {
+                                                        const proj = proyectos.find(p => p.id === e.target.value);
+                                                        setBaseData({ ...baseData, projectId: e.target.value, project: proj?.nombre || '' });
+                                                    }}
+                                                    className={inputClasses}
+                                                    required
+                                                >
+                                                    <option value="" disabled>Seleccionar Sede...</option>
+                                                    {proyectos.map(p => (
+                                                        <option key={p.id} value={p.id}>{p.nombre}</option>
+                                                    ))}
+                                                    {baseData.projectId === MANUAL_PROJECT_OPTION && (
+                                                        <option value={MANUAL_PROJECT_OPTION}>{baseData.project} (Histórico)</option>
+                                                    )}
+                                                </select>
+                                            )}
                                         </div>
                                         
                                         <div className="space-y-2">
@@ -763,7 +776,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                 ))}
                                             </select>
                                             
-                                            {/* Etiquetas de clientes seleccionados */}
                                             {baseData.clientIds.length > 0 && (
                                                 <div className="flex flex-wrap gap-2 mt-3">
                                                     {baseData.clientIds.map(id => {
