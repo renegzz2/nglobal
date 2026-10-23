@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { UsaShipmentReport, ClienteDB, LineaTransporteDB, ProductoDB } from '../types';
-import { TruckIcon, BoxIcon, ClockIcon, ExclamationIcon } from './icons';
+import { TruckIcon, BoxIcon, ClockIcon, ExclamationIcon, DocumentIcon, XIcon, PlusIcon } from './icons';
 import { formatCarrierName, toSnakeCase } from '../utils/formatters';
 import { useNotification } from './NotificationProvider';
 
@@ -27,15 +27,78 @@ const getWeekFromDate = (dateStr: string) => {
     return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 };
 
+// Componente inteligente para Input Monetario con Formato
+const CurrencyInput = ({ value, onChange, className, readOnly = false, isNegative = false }: any) => {
+    const [isFocused, setIsFocused] = useState(false);
+    const numValue = Number(value) || 0;
+    
+    // Al no tener foco, mostramos formato de moneda
+    const displayValue = isFocused ? value : numValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    return (
+        <div className="relative">
+            <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold ${isNegative ? 'text-danger' : 'text-text-muted'}`}>$</span>
+            <input 
+                type={isFocused ? "number" : "text"} 
+                step="0.01" 
+                className={`${className} pl-7`} 
+                value={displayValue} 
+                onChange={(e) => {
+                    const val = e.target.value;
+                    onChange(val === '' ? '' : parseFloat(val));
+                }}
+                onFocus={() => !readOnly && setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                readOnly={readOnly}
+            />
+        </div>
+    );
+};
+
 const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({ isOpen, onClose, report, clientes, lineas, productos, onUpdate }) => {
     const { addNotification } = useNotification();
     const [saving, setSaving] = useState(false);
+    const [uploadingPdf, setUploadingPdf] = useState(false);
     const [formData, setFormData] = useState<Partial<UsaShipmentReport>>({});
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Estado local para los incidentes detectados y formateados
+    const [incidentCostsLog, setIncidentCostsLog] = useState('');
 
     useEffect(() => {
         if (report) {
+            // LÓGICA DE EXTRACCIÓN 1: Comentarios legacy de Despacho [MXN:40000]
+            let rawFreight = report.freightCost || 0;
+            if (report.comments) {
+                const mxnMatch = report.comments.match(/\[MXN:([\d.]+)\]/);
+                if (mxnMatch) {
+                    rawFreight = parseFloat(mxnMatch[1]);
+                }
+            }
+
+            // LÓGICA DE EXTRACCIÓN 2: Historial de Incidencias con Costos
+            let extraCostsDetected = 0;
+            let logText = '';
+            
+            if (report.incidents && Array.isArray(report.incidents)) {
+                const costsIncidents = report.incidents.filter(inc => inc.extraCost && inc.extraCost.amount > 0);
+                
+                if (costsIncidents.length > 0) {
+                    logText += "==== COSTOS REPORTADOS EN INCIDENCIAS ====\n";
+                    costsIncidents.forEach(inc => {
+                        const type = inc.extraCost?.type || 'Extra';
+                        const amount = inc.extraCost?.amount || 0;
+                        logText += `- ${type}: $${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}\n`;
+                        extraCostsDetected += amount;
+                    });
+                    logText += `TOTAL EXTRAS SUGERIDOS: $${extraCostsDetected.toLocaleString(undefined, {minimumFractionDigits: 2})}\n====================================\n\n`;
+                }
+            }
+            
+            setIncidentCostsLog(logText);
+
             setFormData({
-                freightCost: report.freightCost || 0,
+                freightCost: rawFreight,
                 extraCosts: report.extraCosts || 0,
                 fines: report.fines || 0,
                 freightPayer: report.freightPayer || 'NGLOBAL',
@@ -46,7 +109,9 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                 fiscalFolio: report.fiscalFolio || '',
                 freightInPortfolio: report.freightInPortfolio || false,
                 paymentStatus: report.paymentStatus || 'Pendiente',
-                comments: report.comments || ''
+                invoiceUrl: report.invoiceUrl || '', // Para la URL del PDF guardado en Supabase
+                // Limpiamos el MXN de los comentarios, pero mantenemos el resto
+                comments: (report.comments || '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim()
             });
         }
     }, [report]);
@@ -54,6 +119,56 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
     const finalFreight = useMemo(() => {
         return (Number(formData.freightCost) || 0) + (Number(formData.extraCosts) || 0) - (Number(formData.fines) || 0);
     }, [formData.freightCost, formData.extraCosts, formData.fines]);
+
+    const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.type !== 'application/pdf') {
+            addNotification({ type: 'danger', title: 'Error de archivo', message: 'Solo se permiten archivos en formato PDF.' });
+            return;
+        }
+
+        setUploadingPdf(true);
+        try {
+            // Nombre único para el archivo, usando el ID del reporte
+            const fileExt = file.name.split('.').pop();
+            const fileName = `factura_${report.tripId}_${Date.now()}.${fileExt}`;
+            const filePath = `facturas_operadores/${fileName}`;
+
+            // Subimos al bucket 'documentos' de Supabase
+            const { error: uploadError } = await supabase.storage
+                .from('documentos')
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            // Obtenemos la URL pública para leer el archivo
+            const { data: { publicUrl } } = supabase.storage
+                .from('documentos')
+                .getPublicUrl(filePath);
+
+            // Actualizamos nuestro formulario local
+            setFormData(prev => ({ 
+                ...prev, 
+                invoiceUrl: publicUrl,
+                invoiceReceived: true // Marcamos automáticamente que ya se recibió
+            }));
+            
+            addNotification({ type: 'success', title: 'PDF Subido', message: 'Factura anexada al expediente.' });
+        } catch (error: any) {
+            console.error("Error subiendo PDF:", error);
+            addNotification({ type: 'danger', title: 'Error de Servidor', message: error.message || 'No se pudo subir el archivo a la nube.' });
+        } finally {
+            setUploadingPdf(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const handleRemovePdf = () => {
+        // Podríamos eliminarlo del storage, pero por seguridad, solo lo desvinculamos de la BD
+        setFormData(prev => ({ ...prev, invoiceUrl: '', invoiceReceived: false }));
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -136,9 +251,14 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                             <div>
                                 <label className={labelClass}>Comentarios / Incidencias</label>
                                 <textarea 
-                                    className={`${inputClass} h-24 text-xs`}
-                                    value={formData.comments}
-                                    onChange={e => setFormData({...formData, comments: e.target.value})}
+                                    className={`${inputClass} h-40 text-xs font-mono`}
+                                    value={incidentCostsLog + formData.comments}
+                                    onChange={e => {
+                                        // Si el usuario edita, removemos el log para que no se duplique al guardar
+                                        const newVal = e.target.value;
+                                        const cleanVal = newVal.replace(incidentCostsLog, '');
+                                        setFormData({...formData, comments: cleanVal});
+                                    }}
                                     placeholder="Bitácora de incidencias del viaje..."
                                 />
                             </div>
@@ -150,28 +270,43 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                         <h4 className="text-xs font-black text-primary uppercase border-b border-primary/10 pb-2">Cálculo de Liquidación</h4>
                         <div className="space-y-4">
                             <div>
-                                <label className={labelClass}>Monto Flete ($)</label>
-                                <input type="number" step="0.01" className={inputClass} value={formData.freightCost} onChange={e => setFormData({...formData, freightCost: parseFloat(e.target.value) || 0})} />
+                                <label className={labelClass}>Monto Flete Base</label>
+                                <CurrencyInput 
+                                    className={inputClass} 
+                                    value={formData.freightCost} 
+                                    onChange={(v: number) => setFormData({...formData, freightCost: v})} 
+                                />
                             </div>
                             <div>
-                                <label className={labelClass}>Estadías / Insumos / Extras ($)</label>
-                                <input type="number" step="0.01" className={inputClass} value={formData.extraCosts} onChange={e => setFormData({...formData, extraCosts: parseFloat(e.target.value) || 0})} />
+                                <label className={labelClass}>Estadías / Insumos / Extras (+)</label>
+                                <CurrencyInput 
+                                    className={`${inputClass} text-emerald-700 bg-emerald-50/30 border-emerald-100 focus:ring-emerald-500/10`} 
+                                    value={formData.extraCosts} 
+                                    onChange={(v: number) => setFormData({...formData, extraCosts: v})} 
+                                />
                             </div>
                             <div>
-                                <label className={labelClass}>Multas Aplicadas ($)</label>
-                                <input type="number" step="0.01" className={`${inputClass} text-danger`} value={formData.fines} onChange={e => setFormData({...formData, fines: parseFloat(e.target.value) || 0})} />
+                                <label className={labelClass}>Multas Aplicadas (-)</label>
+                                <CurrencyInput 
+                                    className={`${inputClass} text-danger bg-red-50/30 border-red-100 focus:ring-red-500/10`} 
+                                    value={formData.fines} 
+                                    onChange={(v: number) => setFormData({...formData, fines: v})} 
+                                    isNegative={true}
+                                />
                             </div>
-                            <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-200 text-center shadow-inner">
+                            <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-200 text-center shadow-inner mt-6">
                                 <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-2 block">Cálculo de Flete Final</span>
-                                <p className="text-4xl font-black text-emerald-600">${finalFreight.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                <p className="text-4xl font-black text-emerald-600">${finalFreight.toLocaleString(en-US, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                             </div>
-                            <div>
-                                <label className={labelClass}>Paga flete (Empresa)</label>
-                                <input type="text" className={inputClass} value={formData.freightPayer} onChange={e => setFormData({...formData, freightPayer: e.target.value.toUpperCase()})} />
-                            </div>
-                            <div>
-                                <label className={labelClass}>Revisó Liquidación (ID)</label>
-                                <input type="text" className={inputClass} value={formData.reviewerId} onChange={e => setFormData({...formData, reviewerId: e.target.value.toUpperCase()})} placeholder="Nombre de quien valida" />
+                            <div className="grid grid-cols-2 gap-4 mt-6">
+                                <div>
+                                    <label className={labelClass}>Paga flete</label>
+                                    <input type="text" className={inputClass} value={formData.freightPayer} onChange={e => setFormData({...formData, freightPayer: e.target.value.toUpperCase()})} />
+                                </div>
+                                <div>
+                                    <label className={labelClass}>Revisó (ID)</label>
+                                    <input type="text" className={inputClass} value={formData.reviewerId} onChange={e => setFormData({...formData, reviewerId: e.target.value.toUpperCase()})} placeholder="Auditor" />
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -180,11 +315,54 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                     <div className="space-y-6">
                         <h4 className="text-xs font-black text-primary uppercase border-b border-primary/10 pb-2">Control Administrativo</h4>
                         <div className="space-y-4">
+                            
+                            {/* ZONA DE CARGA DE FACTURA PDF */}
+                            <div>
+                                <label className={labelClass}>Factura PDF del Transportista</label>
+                                <input 
+                                    type="file" 
+                                    accept="application/pdf"
+                                    className="hidden" 
+                                    ref={fileInputRef}
+                                    onChange={handlePdfUpload}
+                                />
+                                {formData.invoiceUrl ? (
+                                    <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><DocumentIcon className="w-5 h-5" /></div>
+                                            <div>
+                                                <p className="text-[11px] font-black text-blue-800 uppercase tracking-widest">Factura Anexada</p>
+                                                <a href={formData.invoiceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-blue-600 hover:underline">Ver documento PDF</a>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={handleRemovePdf} className="p-2 text-blue-400 hover:text-danger hover:bg-blue-100 rounded-full transition-colors" title="Quitar PDF">
+                                            <XIcon className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <button 
+                                        type="button" 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={uploadingPdf}
+                                        className="w-full py-4 border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-gray-50 hover:border-primary/30 transition-all text-text-muted hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed group"
+                                    >
+                                        {uploadingPdf ? (
+                                            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                            <>
+                                                <PlusIcon className="w-6 h-6 opacity-50 group-hover:opacity-100" />
+                                                <span className="text-xs font-bold uppercase tracking-widest">Cargar PDF</span>
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-4 rounded-2xl border transition-all ${formData.invoiceReceived ? 'bg-success/10 border-success shadow-inner' : 'bg-gray-100 border-border'}`}>
                                     <label className="flex flex-col items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" checked={formData.invoiceReceived} onChange={e => setFormData({...formData, invoiceReceived: e.target.checked})} className="w-5 h-5 rounded-lg text-success" />
-                                        <span className="text-[9px] font-black uppercase text-center">Factura Recibida</span>
+                                        <input type="checkbox" checked={formData.invoiceReceived} onChange={e => setFormData({...formData, invoiceReceived: e.target.checked})} className="w-5 h-5 rounded-lg text-success" disabled={!!formData.invoiceUrl} />
+                                        <span className="text-[9px] font-black uppercase text-center">Físico / Recibida</span>
                                     </label>
                                 </div>
                                 <div className={`p-4 rounded-2xl border transition-all ${formData.passedToPayment ? 'bg-info/10 border-info shadow-inner' : 'bg-gray-100 border-border'}`}>
@@ -196,8 +374,8 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                             </div>
                             
                             <div>
-                                <label className={labelClass}>Factura Línea / Proveedor</label>
-                                <input type="text" className={inputClass} value={formData.carrierInvoiceNumber} onChange={e => setFormData({...formData, carrierInvoiceNumber: e.target.value.toUpperCase()})} placeholder="Folio de Factura" />
+                                <label className={labelClass}>Folio / Num. Factura</label>
+                                <input type="text" className={inputClass} value={formData.carrierInvoiceNumber} onChange={e => setFormData({...formData, carrierInvoiceNumber: e.target.value.toUpperCase()})} placeholder="Ej. A-1020" />
                             </div>
                             <div>
                                 <label className={labelClass}>Folio Fiscal (UUID)</label>

@@ -106,7 +106,7 @@ const FreightPaymentPage: React.FC = () => {
             header: "FLETE FINAL",
             accessor: (r) => {
                 const final = (Number(r.freightCost) || 0) + (Number(r.extraCosts) || 0) - (Number(r.fines) || 0);
-                return <span className="font-black text-emerald-600 text-xs">${final.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                return <span className="font-black text-emerald-600 text-xs">${final.toLocaleString('undefined', { minimumFractionDigits: 2 })}</span>
             }
         },
         {

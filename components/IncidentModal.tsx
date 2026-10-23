@@ -25,11 +25,20 @@ const INCIDENT_TYPES = [
     'Otro'
 ];
 
+const COST_TYPES = [
+    'Estadía / Demora',
+    'Maniobras',
+    'Multa de Tránsito',
+    'Insumos / Refacciones',
+    'Pensión / Resguardo',
+    'Otro Costo Extra'
+];
+
 const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, logisticStatuses, onUpdate }) => {
     const { addNotification } = useNotification();
     const [incidents, setIncidents] = useState<Incident[]>([]);
     const [isAdding, setIsAdding] = useState(false);
-    const [currentStatus, setCurrentStatus] = useState(report.logisticStatus);
+    
     const [newIncident, setNewIncident] = useState<Incident>({
         type: '',
         location: '',
@@ -37,13 +46,20 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
         description: '',
         reportedBy: ''
     });
+    
+    // NUEVO: Estado para costos adicionales de la incidencia
+    const [hasExtraCost, setHasExtraCost] = useState(false);
+    const [costDetails, setCostDetails] = useState({
+        costType: '',
+        amount: 0
+    });
+
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         if (isOpen && report) {
             setIncidents(Array.isArray(report.incidents) ? report.incidents : []);
             setIsAdding(false);
-            setCurrentStatus(report.logisticStatus);
             
             // Tratamos de obtener el nombre del usuario logueado desde localStorage
             const savedUser = localStorage.getItem('ng_auth_profile');
@@ -66,8 +82,26 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
             return;
         }
 
+        if (hasExtraCost && (!costDetails.costType || costDetails.amount <= 0)) {
+            addNotification({ type: 'warning', title: 'Costo Incompleto', message: 'Debe especificar el tipo y un monto válido mayor a 0.' });
+            return;
+        }
+
         setSaving(true);
-        const incidentToSave = { ...newIncident, timestamp: new Date().toISOString() };
+        
+        // Empaquetamos el costo dentro del objeto de incidencia si fue activado
+        const incidentToSave: Incident = { 
+            ...newIncident, 
+            timestamp: new Date().toISOString()
+        };
+        
+        if (hasExtraCost) {
+            incidentToSave.extraCost = {
+                type: costDetails.costType,
+                amount: costDetails.amount
+            };
+        }
+
         const updatedIncidents = [...incidents, incidentToSave];
         
         try {
@@ -82,13 +116,20 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
             setIncidents(updatedIncidents);
             setIsAdding(false);
             setNewIncident(prev => ({ type: '', location: '', timestamp: '', description: '', reportedBy: prev.reportedBy }));
+            setHasExtraCost(false);
+            setCostDetails({ costType: '', amount: 0 });
+            
             addNotification({ type: 'success', title: 'Bitácora Actualizada', message: 'La incidencia se ha registrado correctamente.' });
             
             // WHATSAPP_NOTIFICATION_TRIGGER
             try {
                 // Number should be the coordinator's or a fallback
                 const coordinatorPhone = "523312345678"; // Example placeholder
-                await sendWhatsAppText(coordinatorPhone, `🚨 *INCIDENCIA DETECTADA* \n🚢 *Viaje:* ${report.tripId}\n⚠️ *Tipo:* ${incidentToSave.type}\n📍 *Ubicación:* ${incidentToSave.location || 'No especificada'}\n📝 *Detalle:* ${incidentToSave.description}\n👤 *Reportó:* ${incidentToSave.reportedBy}`);
+                let costMsg = "";
+                if (hasExtraCost) {
+                    costMsg = `\n💰 *Posible Costo Extra:* ${costDetails.costType} ($${costDetails.amount})`;
+                }
+                await sendWhatsAppText(coordinatorPhone, `🚨 *INCIDENCIA DETECTADA* \n🚢 *Viaje:* ${report.tripId}\n⚠️ *Tipo:* ${incidentToSave.type}\n📍 *Ubicación:* ${incidentToSave.location || 'No especificada'}\n📝 *Detalle:* ${incidentToSave.description}\n👤 *Reportó:* ${incidentToSave.reportedBy}${costMsg}`);
                 console.log("NOTIFICACIÓN_WS_ENVIADA");
             } catch (wsErr) {
                 console.error("Fallo envío WhatsApp:", wsErr);
@@ -102,6 +143,9 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
             
             setIncidents(updatedIncidents);
             setIsAdding(false);
+            setHasExtraCost(false);
+            setCostDetails({ costType: '', amount: 0 });
+            
             addNotification({ 
                 type: 'warning', 
                 title: 'Modo Offline', 
@@ -160,14 +204,54 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
                                     <label className="text-[9px] font-black text-text-muted uppercase mb-1 block">Descripción *</label>
                                     <textarea 
                                         className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs font-bold outline-none h-20"
-                                        placeholder="Detalles..."
+                                        placeholder="Detalles de lo sucedido..."
                                         value={newIncident.description}
                                         onChange={e => setNewIncident({...newIncident, description: e.target.value})}
                                     ></textarea>
                                 </div>
+
+                                {/* SECCIÓN DE COBROS EXTRA */}
+                                <div className="p-3 bg-red-50/50 rounded-xl border border-red-100">
+                                    <label className="flex items-center gap-2 cursor-pointer mb-2">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 text-danger rounded border-red-200 focus:ring-danger"
+                                            checked={hasExtraCost}
+                                            onChange={(e) => setHasExtraCost(e.target.checked)}
+                                        />
+                                        <span className="text-[10px] font-black text-danger uppercase tracking-widest">¿Genera Cargo Extra / Estadía?</span>
+                                    </label>
+
+                                    {hasExtraCost && (
+                                        <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-red-100 animate-slide-up">
+                                            <div>
+                                                <label className="text-[9px] font-black text-red-900 uppercase mb-1 block">Tipo de Cargo</label>
+                                                <select 
+                                                    className="w-full bg-white border border-red-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-red-100"
+                                                    value={costDetails.costType}
+                                                    onChange={e => setCostDetails({...costDetails, costType: e.target.value})}
+                                                >
+                                                    <option value="">Seleccione...</option>
+                                                    {COST_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-black text-red-900 uppercase mb-1 block">Monto Solicitado ($)</label>
+                                                <input 
+                                                    type="number"
+                                                    className="w-full bg-white border border-red-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-red-100"
+                                                    placeholder="0.00"
+                                                    min="0"
+                                                    value={costDetails.amount || ''}
+                                                    onChange={e => setCostDetails({...costDetails, amount: parseFloat(e.target.value) || 0})}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div className="flex gap-2 pt-2">
-                                <button onClick={() => setIsAdding(false)} className="flex-1 py-2 rounded-lg font-bold text-[10px] text-text-muted hover:bg-hover transition-all">Atrás</button>
+                                <button onClick={() => { setIsAdding(false); setHasExtraCost(false); }} className="flex-1 py-2 rounded-lg font-bold text-[10px] text-text-muted hover:bg-hover transition-all">Atrás</button>
                                 <button 
                                     onClick={handleAddIncident} 
                                     disabled={saving}
@@ -209,6 +293,14 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
                                                     </p>
                                                 )}
                                                 <p className="text-xs text-text-primary leading-tight mt-1 bg-surface-secondary/50 p-2 rounded-lg">{inc.description}</p>
+                                                
+                                                {/* Mostrar etiqueta de Costo Extra si existe en la incidencia */}
+                                                {inc.extraCost && (
+                                                    <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 border border-red-200 rounded text-[9px] font-black text-red-700 uppercase tracking-widest">
+                                                        <span>💰 Petición de Cobro:</span>
+                                                        <span>{inc.extraCost.type} (${inc.extraCost.amount?.toLocaleString()})</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>

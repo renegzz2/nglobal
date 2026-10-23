@@ -172,7 +172,8 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [baseData, setBaseData] = useState({
         tripId: '',
         project: '',
-        projectId: '',
+        projectIds: [] as string[], // NUEVO: Arreglo de proyectos seleccionados
+        projectId: '', // Mantenemos por compatibilidad histórica
         stopOverProjectId: '',
         sucursalId: '',
         clientId: '',
@@ -266,6 +267,12 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         if (initialData) {
             const initialProjectId = initialData.projectId || (initialData.project ? MANUAL_PROJECT_OPTION : '');
             
+            // Cargar los IDs de proyectos iniciales
+            let initProjectIds: string[] = [];
+            if (initialData.projectId) {
+                initProjectIds = [initialData.projectId];
+            }
+            
             let initialLotes: string[] = [];
             if (initialData.lotesAsociados && Array.isArray(initialData.lotesAsociados)) {
                 initialLotes = initialData.lotesAsociados;
@@ -286,6 +293,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             setBaseData({
                 tripId: initialData.tripId || '',
                 project: initialData.project || '',
+                projectIds: initProjectIds,
                 projectId: initialProjectId,
                 stopOverProjectId: initialData.stopOverProjectId || '',
                 sucursalId: initialData.sucursalId || '',
@@ -342,6 +350,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             setBaseData({
                 tripId: '',
                 project: '',
+                projectIds: [],
                 projectId: '',
                 stopOverProjectId: '',
                 sucursalId: '',
@@ -422,6 +431,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         setBaseData(prev => ({
             ...prev,
             lotesAsociados: newLotes,
+            projectIds: [], // Limpiamos la selección manual de proyectos si entra un lote
             project: newProjectName,
             products: allProducts,
             departureDateTime: prev.lotesAsociados.length === 0 ? toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`) : prev.departureDateTime,
@@ -584,24 +594,30 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             addNotification({ type: 'danger', title: 'Atención', message: 'Debe definir el Folio de Viaje oficial.' });
             return;
         }
-        if (!baseData.projectId || (baseData.projectId === MANUAL_PROJECT_OPTION && !baseData.project.trim())) {
-            addNotification({ type: 'danger', title: 'Atención', message: 'Debe seleccionar o capturar la sede de origen / proyecto.' });
+
+        const isConsolidated = baseData.lotesAsociados.length > 0 || baseData.projectIds.length > 1;
+
+        if (baseData.lotesAsociados.length === 0 && baseData.projectIds.length === 0 && !baseData.project.trim()) {
+            addNotification({ type: 'danger', title: 'Atención', message: 'Debe seleccionar o capturar al menos una sede de origen / proyecto.' });
             return;
         }
+
         const targetStatus = forcedStatus || units[0].logisticStatus || 'Confirmado';
 
         const payloads = units.map((u) => ({
             id: u.isNew ? undefined : u.id,
             tripId: baseData.tripId,
-            project: baseData.projectId === MANUAL_PROJECT_OPTION ? baseData.project.trim() : baseData.project,
-            projectId: baseData.projectId === MANUAL_PROJECT_OPTION ? '' : baseData.projectId,
+            // Mandamos el texto consolidado/simple a la columna de texto
+            project: baseData.project.trim(),
+            // Si hay más de un proyecto manual o es consolidado, omitimos el ID para no romper llaves foráneas
+            projectId: baseData.projectIds.length === 1 ? baseData.projectIds[0] : null,
             stopOverProjectId: baseData.stopOverProjectId || null,
             sucursalId: baseData.sucursalId,
             clientId: baseData.clientIds.length > 0 ? baseData.clientIds[0] : null,
             clientIds: baseData.clientIds,
             lineaTransportistaId: u.lineaId || null,
             unidadTransporteId: u.unidadId || null,
-            isConsolidated: baseData.lotesAsociados.length > 1,
+            isConsolidated: isConsolidated,
             lotesAsociados: baseData.lotesAsociados,
             products: baseData.products.map(({ id, ...p }) => ({
                 ...p,
@@ -727,7 +743,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                            <label className={labelClasses}>Sede de Origen / Proyecto *</label>
+                                            <label className={labelClasses}>Sedes de Origen / Proyecto *</label>
                                             {baseData.lotesAsociados.length > 0 ? (
                                                 <input
                                                     type="text"
@@ -737,23 +753,57 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                     title="Nombre autogenerado por los lotes seleccionados"
                                                 />
                                             ) : (
-                                                <select
-                                                    value={baseData.projectId || ''}
-                                                    onChange={(e) => {
-                                                        const proj = proyectos.find(p => p.id === e.target.value);
-                                                        setBaseData({ ...baseData, projectId: e.target.value, project: proj?.nombre || '' });
-                                                    }}
-                                                    className={inputClasses}
-                                                    required
-                                                >
-                                                    <option value="" disabled>Seleccionar Sede...</option>
-                                                    {proyectos.map(p => (
-                                                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                                                    ))}
-                                                    {baseData.projectId === MANUAL_PROJECT_OPTION && (
-                                                        <option value={MANUAL_PROJECT_OPTION}>{baseData.project} (Histórico)</option>
+                                                <>
+                                                    <select
+                                                        className={inputClasses}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            if (val && !baseData.projectIds.includes(val)) {
+                                                                const newIds = [...baseData.projectIds, val];
+                                                                const names = newIds.map(id => proyectos.find(p => p.id === id)?.nombre).join(' / ');
+                                                                setBaseData(prev => ({ ...prev, projectIds: newIds, project: names }));
+                                                            }
+                                                            e.target.value = '';
+                                                        }}
+                                                        value=""
+                                                    >
+                                                        <option value="" disabled>+ Añadir Sede / Proyecto...</option>
+                                                        {proyectos.filter(p => !baseData.projectIds.includes(p.id)).map(p => (
+                                                            <option key={p.id} value={p.id}>{p.nombre}</option>
+                                                        ))}
+                                                    </select>
+
+                                                    {baseData.projectIds.length > 0 && (
+                                                        <div className="flex flex-wrap gap-2 mt-3">
+                                                            {baseData.projectIds.map(id => {
+                                                                const p = proyectos.find(x => x.id === id);
+                                                                return (
+                                                                    <div key={id} className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-xl shadow-sm">
+                                                                        <span className="text-[10px] font-black uppercase tracking-widest">{p?.nombre || 'Desconocido'}</span>
+                                                                        <button 
+                                                                            type="button" 
+                                                                            onClick={() => {
+                                                                                const newIds = baseData.projectIds.filter(x => x !== id);
+                                                                                const names = newIds.map(uid => proyectos.find(proj => proj.id === uid)?.nombre).join(' / ');
+                                                                                setBaseData(prev => ({...prev, projectIds: newIds, project: names}));
+                                                                            }} 
+                                                                            className="ml-1 p-0.5 hover:bg-indigo-200 hover:text-danger rounded-full transition-colors"
+                                                                        >
+                                                                            <XIcon className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     )}
-                                                </select>
+
+                                                    {/* Respaldo para viajes antiguos capturados a mano */}
+                                                    {baseData.projectIds.length === 0 && baseData.project && (
+                                                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 text-gray-500 px-3 py-1.5 rounded-xl mt-3">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest">{baseData.project} (Histórico)</span>
+                                                        </div>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
                                         
