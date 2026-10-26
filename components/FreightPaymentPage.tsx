@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { UsaShipmentReport, LineaTransporteDB, ProyectoDB, ClienteDB, ProductoDB } from '../types';
 import DataTable, { Column } from './ui/DataTable';
-import { EyeIcon, DownloadIcon, BoxIcon, TruckIcon, ClockIcon } from './icons';
+import { EyeIcon, DownloadIcon, BoxIcon, TruckIcon, ClockIcon, CurrencyDollarIcon } from './icons';
 import { formatCarrierName, toCamelCase, toSnakeCase } from '../utils/formatters';
 import { useNotification } from './NotificationProvider';
 import FreightPaymentDetailsModal from './FreightPaymentDetailsModal';
@@ -75,6 +75,26 @@ const FreightPaymentPage: React.FC = () => {
         setIsDetailsModalOpen(true);
     };
 
+    const handleMarkAsPaid = async (e: React.MouseEvent, id: string) => {
+        e.stopPropagation(); // Evita que se abra el modal de detalles
+        
+        const confirm = window.confirm("¿Confirmar que el cliente u otro tercero ya cubrió el pago de este flete?");
+        if (!confirm) return;
+
+        try {
+            const { error } = await supabase
+                .from('usa_shipment_reports')
+                .update({ payment_status: 'Pagado' })
+                .eq('id', id);
+
+            if (error) throw error;
+            addNotification({ type: 'success', title: 'Flete Liquidado', message: 'El estatus se ha actualizado a Pagado exitosamente.' });
+            fetchData();
+        } catch (error: any) {
+            addNotification({ type: 'danger', title: 'Error', message: 'No se pudo procesar la liquidación.' });
+        }
+    };
+
     const columns: Column<UsaShipmentReport>[] = [
         {
             header: "SEMANA",
@@ -86,12 +106,24 @@ const FreightPaymentPage: React.FC = () => {
         },
         {
             header: "RUTA OPERATIVA",
-            accessor: (r) => (
-                <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-text-primary uppercase">{r.project || 'S/D'}</span>
-                    <span className="text-[9px] text-text-muted font-bold uppercase">{clientes.find(c => c.id === r.clientId)?.nombre || 'DESTINO'}</span>
-                </div>
-            )
+            accessor: (r) => {
+                // Extraer arreglo de clientes consolidados con fallback al cliente único
+                let clientsStr = clientes.find(c => c.id === r.clientId)?.nombre || 'DESTINO';
+                if (r.clientIds && r.clientIds.length > 0) {
+                    clientsStr = r.clientIds.map(cid => clientes.find(c => c.id === cid)?.nombre).filter(Boolean).join(' | ');
+                } else if ((r as any).client_ids && (r as any).client_ids.length > 0) {
+                    clientsStr = (r as any).client_ids.map((cid: string) => clientes.find(c => c.id === cid)?.nombre).filter(Boolean).join(' | ');
+                }
+
+                return (
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-text-primary uppercase truncate max-w-[140px]" title={r.project}>{r.project || 'S/D'}</span>
+                        <span className="text-[9px] text-text-muted font-bold uppercase truncate max-w-[140px]" title={clientsStr}>
+                            {clientsStr}
+                        </span>
+                    </div>
+                );
+            }
         },
         {
             header: "TRANSPORTISTA",
@@ -106,7 +138,7 @@ const FreightPaymentPage: React.FC = () => {
             header: "FLETE FINAL",
             accessor: (r) => {
                 const final = (Number(r.freightCost) || 0) + (Number(r.extraCosts) || 0) - (Number(r.fines) || 0);
-                return <span className="font-black text-emerald-600 text-xs">${final.toLocaleString('undefined', { minimumFractionDigits: 2 })}</span>
+                return <span className="font-black text-emerald-600 text-xs">${final.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             }
         },
         {
@@ -122,12 +154,30 @@ const FreightPaymentPage: React.FC = () => {
         },
         {
             header: "ACCIONES",
-            className: "text-center",
-            accessor: (r) => (
-                <button onClick={() => handleOpenDetails(r.id)} className="p-2 rounded-lg hover:bg-primary/10 text-primary transition-colors">
-                    <EyeIcon className="w-5 h-5" />
-                </button>
-            )
+            className: "text-center min-w-[100px]",
+            accessor: (r) => {
+                // Verificamos si el pagador del flete es el cliente o un tercero
+                const payer = (r.freightPayer || '').toUpperCase();
+                const isPaidByClient = payer.includes('CLIENTE') || payer === 'OTRO';
+                
+                return (
+                    <div className="flex items-center justify-center gap-2">
+                        <button onClick={() => handleOpenDetails(r.id)} className="p-2 rounded-lg hover:bg-primary/10 text-primary transition-colors" title="Revisar Auditoría">
+                            <EyeIcon className="w-5 h-5" />
+                        </button>
+                        
+                        {isPaidByClient && r.paymentStatus !== 'Pagado' && (
+                            <button 
+                                onClick={(e) => handleMarkAsPaid(e, r.id)} 
+                                className="p-2 rounded-lg hover:bg-emerald-100 text-emerald-600 transition-colors shadow-sm"
+                                title="Liquidar Directo (Costo absorbido por Cliente/Tercero)"
+                            >
+                                <CurrencyDollarIcon className="w-5 h-5" />
+                            </button>
+                        )}
+                    </div>
+                );
+            }
         }
     ];
 
