@@ -2,12 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { UsaShipmentReport, LineaTransporteDB, ProyectoDB, ClienteDB, ProductoDB } from '../types';
 import DataTable, { Column } from './ui/DataTable';
-import { EyeIcon, DownloadIcon, BoxIcon, TruckIcon, ClockIcon, CurrencyDollarIcon } from './icons';
-import { formatCarrierName, toCamelCase, toSnakeCase } from '../utils/formatters';
+import { EyeIcon, CurrencyDollarIcon } from './icons';
+import { formatCarrierName, toCamelCase } from '../utils/formatters';
 import { useNotification } from './NotificationProvider';
 import FreightPaymentDetailsModal from './FreightPaymentDetailsModal';
 
-// Función para calcular la semana fiscal desde la fecha de salida (Regla 2: Lógica de Frontend)
 const getWeekFromDate = (dateStr: string) => {
     if (!dateStr) return '--';
     const date = new Date(dateStr);
@@ -76,17 +75,13 @@ const FreightPaymentPage: React.FC = () => {
     };
 
     const handleMarkAsPaid = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation(); // Evita que se abra el modal de detalles
+        e.stopPropagation();
         
-        const confirm = window.confirm("¿Confirmar que el cliente u otro tercero ya cubrió el pago de este flete?");
+        const confirm = window.confirm("¿Confirmar que el cliente u otro tercero ya cubrió el pago de este flete en su totalidad?");
         if (!confirm) return;
 
         try {
-            const { error } = await supabase
-                .from('usa_shipment_reports')
-                .update({ payment_status: 'Pagado' })
-                .eq('id', id);
-
+            const { error } = await supabase.from('usa_shipment_reports').update({ payment_status: 'Pagado' }).eq('id', id);
             if (error) throw error;
             addNotification({ type: 'success', title: 'Flete Liquidado', message: 'El estatus se ha actualizado a Pagado exitosamente.' });
             fetchData();
@@ -107,7 +102,6 @@ const FreightPaymentPage: React.FC = () => {
         {
             header: "RUTA OPERATIVA",
             accessor: (r) => {
-                // Extraer arreglo de clientes consolidados con fallback al cliente único
                 let clientsStr = clientes.find(c => c.id === r.clientId)?.nombre || 'DESTINO';
                 if (r.clientIds && r.clientIds.length > 0) {
                     clientsStr = r.clientIds.map(cid => clientes.find(c => c.id === cid)?.nombre).filter(Boolean).join(' | ');
@@ -118,9 +112,7 @@ const FreightPaymentPage: React.FC = () => {
                 return (
                     <div className="flex flex-col">
                         <span className="text-[10px] font-black text-text-primary uppercase truncate max-w-[140px]" title={r.project}>{r.project || 'S/D'}</span>
-                        <span className="text-[9px] text-text-muted font-bold uppercase truncate max-w-[140px]" title={clientsStr}>
-                            {clientsStr}
-                        </span>
+                        <span className="text-[9px] text-text-muted font-bold uppercase truncate max-w-[140px]" title={clientsStr}>{clientsStr}</span>
                     </div>
                 );
             }
@@ -156,9 +148,15 @@ const FreightPaymentPage: React.FC = () => {
             header: "ACCIONES",
             className: "text-center min-w-[100px]",
             accessor: (r) => {
-                // Verificamos si el pagador del flete es el cliente o un tercero
-                const payer = (r.freightPayer || '').toUpperCase();
-                const isPaidByClient = payer.includes('CLIENTE') || payer === 'OTRO';
+                const isConsolidated = r.clientIds && r.clientIds.length > 1;
+                let isPaidByClient = false;
+                
+                if (isConsolidated) {
+                    isPaidByClient = (r.products || []).length > 0 && (r.products || []).every((p: any) => p.freightPayer === 'CLIENTE');
+                } else {
+                    const payer = (r.freightPayer || '').toUpperCase();
+                    isPaidByClient = payer.includes('CLIENTE') || payer === 'OTRO';
+                }
                 
                 return (
                     <div className="flex items-center justify-center gap-2">
@@ -190,7 +188,6 @@ const FreightPaymentPage: React.FC = () => {
                 </div>
                 <div className="relative w-80 group">
                     <input type="text" placeholder="Buscar remisión, línea..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white border border-border rounded-xl px-4 py-3 text-sm font-bold pl-12 focus:ring-4 focus:ring-primary/5 outline-none transition-all shadow-sm" />
-                    <svg className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
             </div>
 

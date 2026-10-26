@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, User, UserRole } from '../types';
-import { DownloadIcon, ChartBarIcon, MapIcon, SettingsIcon, TruckIcon, LayoutGridIcon, DatabaseIcon, TableIcon, BoxIcon, EyeIcon } from './icons';
+import { DownloadIcon, ChartBarIcon, MapIcon, SettingsIcon, TruckIcon, LayoutGridIcon, DatabaseIcon, TableIcon, BoxIcon, EyeIcon, DocumentIcon } from './icons';
 import { subscribeUserToPush } from '../pushService';
-import { ClipboardCheck } from 'lucide-react'; // Corrección para el ícono de Inspección
+import { ClipboardCheck } from 'lucide-react';
 
 interface SidebarProps {
   currentView: View;
@@ -16,6 +16,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogout, showInstallButton, onInstall }) => {
   const [pushEnabled, setPushEnabled] = useState(true);
   const [inspectionsOpen, setInspectionsOpen] = useState(false);
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -26,6 +27,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
   useEffect(() => {
     if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView)) {
       setInspectionsOpen(true);
+    }
+    if ([View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES].includes(currentView)) {
+      setPaymentsOpen(true);
     }
   }, [currentView]);
 
@@ -46,23 +50,25 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     if (user.role === UserRole.INSPECTOR) return false;
     if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
     if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-      return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
+      return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES].includes(view);
     }
     if (user.role === UserRole.LIDER_PROYECTO) {
       return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
     }
     if (user.role === UserRole.COORDINADOR) {
-      // AQUÍ ESTÁ EL CAMBIO: Se agrega View.DATABASE explícitamente para el Coordinador
       return [View.DASHBOARD, View.LIDER_PROGRAMACION_USA, View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
     }
     if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-      return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
+      return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES, View.INVENTORY].includes(view);
     }
     return false;
   };
 
   const canSeeInspections = canSee(View.INSPECTION_QUALITY) || canSee(View.INSPECTION_DASHBOARD) || canSee(View.INSPECTION_INCIDENTS);
   const isInspectionsActive = [View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView);
+
+  const canSeePayments = canSee(View.FREIGHT_PAYMENTS) || canSee(View.COMPLEMENTARY_SERVICES) || canSee(View.CUSTOMS_SERVICES);
+  const isPaymentsActive = [View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES].includes(currentView);
 
   return (
     <div className="flex flex-col h-full bg-[#002D62] text-white border-r border-white/5 shadow-2xl pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -225,13 +231,48 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           </div>
         )}
 
-        {canSee(View.FREIGHT_PAYMENTS) && (
-          <button onClick={() => onNavigate(View.FREIGHT_PAYMENTS)} className={linkClass(View.FREIGHT_PAYMENTS)}>
-            <div className={`p-1.5 rounded-lg ${currentView === View.FREIGHT_PAYMENTS ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </div>
-            <span className="text-sm font-semibold tracking-tight text-emerald-400/90 group-hover:text-emerald-400">Control Pagos</span>
-          </button>
+        {/* NUEVO MENÚ DESPLEGABLE: CONTROL DE PAGOS */}
+        {canSeePayments && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setPaymentsOpen(!paymentsOpen)}
+              className={`group w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-300 ${
+                isPaymentsActive
+                  ? 'bg-white/15 text-white shadow-lg backdrop-blur-md border border-white/10'
+                  : 'text-white/60 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <div className={`p-1.5 rounded-lg ${isPaymentsActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </div>
+                <span className="text-sm font-semibold tracking-tight">Control Pagos</span>
+              </div>
+              <svg className={`w-4 h-4 text-white/40 transition-transform duration-300 ${paymentsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {paymentsOpen && (
+              <div className="ml-6 pl-3 border-l border-white/10 space-y-1 my-1 transition-all">
+                {canSee(View.FREIGHT_PAYMENTS) && (
+                  <button onClick={() => onNavigate(View.FREIGHT_PAYMENTS)} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${currentView === View.FREIGHT_PAYMENTS ? 'bg-emerald-500/30 text-emerald-200 font-bold border border-emerald-400/30 shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
+                    <TruckIcon className="w-4 h-4 opacity-70" />
+                    <span>Fletes y Transportes</span>
+                  </button>
+                )}
+                {canSee(View.COMPLEMENTARY_SERVICES) && (
+                  <button onClick={() => onNavigate(View.COMPLEMENTARY_SERVICES)} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${currentView === View.COMPLEMENTARY_SERVICES ? 'bg-emerald-500/30 text-emerald-200 font-bold border border-emerald-400/30 shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
+                    <BoxIcon className="w-4 h-4 opacity-70" />
+                    <span>Servicios Complementarios</span>
+                  </button>
+                )}
+                {canSee(View.CUSTOMS_SERVICES) && (
+                  <button onClick={() => onNavigate(View.CUSTOMS_SERVICES)} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${currentView === View.CUSTOMS_SERVICES ? 'bg-emerald-500/30 text-emerald-200 font-bold border border-emerald-400/30 shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'}`}>
+                    <DocumentIcon className="w-4 h-4 opacity-70" />
+                    <span>Servicios Aduanales</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {canSee(View.INVENTORY) && (

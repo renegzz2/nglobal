@@ -30,6 +30,8 @@ const ClientReportDashboard = lazy(() => import('./components/ClientReportDashbo
 const TiveMapPage = lazy(() => import('./components/TiveMapPage'));
 const SettingsPage = lazy(() => import('./components/SettingsPage'));
 const FreightPaymentPage = lazy(() => import('./components/FreightPaymentPage'));
+const ComplementaryServicesPage = lazy(() => import('./components/ComplementaryServicesPage'));
+const CustomsServicesPage = lazy(() => import('./components/CustomsServicesPage'));
 const InventoryPage = lazy(() => import('./components/InventoryPage'));
 const PoliciesPage = lazy(() => import('./components/PoliciesPage'));
 
@@ -94,8 +96,6 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 768);
   const [isChatOpen, setIsChatOpen] = useState(window.innerWidth > 1200);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-
-  // Estado para controlar la visibilidad del modal de recuperación de contraseña
   const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
 
   if (!isSupabaseConfigured) {
@@ -137,15 +137,10 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Listener principal de autenticación
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthUser(session?.user || null);
-
-      // Detecta cuando el usuario abre el enlace de recuperación de contraseña
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsResetPasswordOpen(true);
-      }
+      if (event === 'PASSWORD_RECOVERY') setIsResetPasswordOpen(true);
 
       if (!session?.user) {
         setUser(null);
@@ -164,10 +159,7 @@ const App: React.FC = () => {
       setAuthVerified(true);
     });
 
-    // Detect /politicas route
-    if (window.location.pathname === '/politicas') {
-      setCurrentView(View.POLICIES);
-    }
+    if (window.location.pathname === '/politicas') setCurrentView(View.POLICIES);
 
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') document.documentElement.classList.add('dark');
@@ -175,7 +167,6 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Redirección separada e independiente para el rol INSPECTOR
   useEffect(() => {
     if (user?.role === UserRole.INSPECTOR) {
       if (![View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView)) {
@@ -190,9 +181,7 @@ const App: React.FC = () => {
       setDeferredPrompt(e);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   useEffect(() => {
@@ -217,9 +206,7 @@ const App: React.FC = () => {
         const saved = localStorage.getItem('ng_selected_role');
         const legacyUser = saved ? JSON.parse(saved) : null;
         setUser(legacyUser);
-        if (legacyUser) {
-          localStorage.setItem('ng_auth_profile', JSON.stringify(legacyUser));
-        }
+        if (legacyUser) localStorage.setItem('ng_auth_profile', JSON.stringify(legacyUser));
       } catch {
         setUser(null);
       }
@@ -258,19 +245,16 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (!user) return null;
 
-    // Matriz de permisos
     const canAccess = (view: View) => {
       if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
         return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
       }
 
-      if (user.role === UserRole.INSPECTOR) {
-        return false;
-      }
+      if (user.role === UserRole.INSPECTOR) return false;
 
       if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
       if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-        return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
+        return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES].includes(view);
       }
       if (user.role === UserRole.LIDER_PROYECTO) {
         return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
@@ -279,7 +263,7 @@ const App: React.FC = () => {
         return [View.USA_SHIPMENTS, View.LIDER_PROGRAMACION_USA, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
       }
       if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-        return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
+        return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES, View.INVENTORY].includes(view);
       }
       return false;
     };
@@ -312,7 +296,12 @@ const App: React.FC = () => {
         case View.EXEC_REPORT: component = <ClientReportDashboard />; break;
         case View.TIVE_MAP: component = <TiveMapPage />; break;
         case View.SETTINGS: component = <SettingsPage user={user} onNavigate={setCurrentView} />; break;
+        
+        // RUTAS DE PAGOS:
         case View.FREIGHT_PAYMENTS: component = <FreightPaymentPage />; break;
+        case View.COMPLEMENTARY_SERVICES: component = <ComplementaryServicesPage />; break;
+        case View.CUSTOMS_SERVICES: component = <CustomsServicesPage />; break; // Actualiza este archivo cuando crees el real
+
         case View.INVENTORY: component = <InventoryPage />; break;
         case View.POLICIES: component = <PoliciesPage onBack={() => {
           setCurrentView(View.DASHBOARD);
@@ -356,6 +345,8 @@ const App: React.FC = () => {
       case View.TIVE_MAP: return 'Consola Mapas';
       case View.SETTINGS: return 'Configuraciones';
       case View.FREIGHT_PAYMENTS: return 'Pago de Fletes';
+      case View.COMPLEMENTARY_SERVICES: return 'Servicios Complementarios';
+      case View.CUSTOMS_SERVICES: return 'Servicios Aduanales';
       case View.INVENTORY: return 'Gestión de Inventarios';
       case View.POLICIES: return 'Políticas y Privacidad';
       case View.INSPECTION_QUALITY: return 'Inspección de Calidad';
@@ -481,7 +472,6 @@ const App: React.FC = () => {
                 </div>
               </main>
 
-              {/* Right Chat Sidebar */}
               <div className={`fixed inset-y-0 right-0 z-30 bg-white shadow-2xl transform transition-all duration-300 ease-in-out lg:relative lg:translate-x-0 ${isChatOpen ? 'w-full sm:w-80 translate-x-0 opacity-100' : 'w-0 translate-x-full opacity-0 pointer-events-none'}`}>
                 <div className="w-full sm:w-80 h-full">
                   {user && <ChatMessenger user={user} onClose={() => setIsChatOpen(false)} />}
@@ -492,7 +482,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* MODAL DE RESTABLECIMIENTO DE CONTRASEÑA */}
         <ResetPasswordModal
           isOpen={isResetPasswordOpen}
           onClose={() => setIsResetPasswordOpen(false)}
