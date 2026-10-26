@@ -67,7 +67,6 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
 
     useEffect(() => {
         if (report) {
-            // LÓGICA DE EXTRACCIÓN 1: Comentarios legacy de Despacho [MXN:40000]
             let rawFreight = report.freightCost || 0;
             if (report.comments) {
                 const mxnMatch = report.comments.match(/\[MXN:([\d.]+)\]/);
@@ -76,7 +75,6 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                 }
             }
 
-            // LÓGICA DE EXTRACCIÓN 2: Historial de Incidencias con Costos
             let extraCostsDetected = 0;
             let logText = '';
             
@@ -88,10 +86,10 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                     costsIncidents.forEach(inc => {
                         const type = inc.extraCost?.type || 'Extra';
                         const amount = inc.extraCost?.amount || 0;
-                        logText += `- ${type}: $${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}\n`;
+                        logText += `- ${type}: $${amount.toLocaleString('en-US', {minimumFractionDigits: 2})}\n`;
                         extraCostsDetected += amount;
                     });
-                    logText += `TOTAL EXTRAS SUGERIDOS: $${extraCostsDetected.toLocaleString(undefined, {minimumFractionDigits: 2})}\n====================================\n\n`;
+                    logText += `TOTAL EXTRAS SUGERIDOS: $${extraCostsDetected.toLocaleString('en-US', {minimumFractionDigits: 2})}\n====================================\n\n`;
                 }
             }
             
@@ -109,8 +107,7 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                 fiscalFolio: report.fiscalFolio || '',
                 freightInPortfolio: report.freightInPortfolio || false,
                 paymentStatus: report.paymentStatus || 'Pendiente',
-                invoiceUrl: report.invoiceUrl || '', // Para la URL del PDF guardado en Supabase
-                // Limpiamos el MXN de los comentarios, pero mantenemos el resto
+                invoiceUrl: report.invoiceUrl || '',
                 comments: (report.comments || '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim()
             });
         }
@@ -119,6 +116,21 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
     const finalFreight = useMemo(() => {
         return (Number(formData.freightCost) || 0) + (Number(formData.extraCosts) || 0) - (Number(formData.fines) || 0);
     }, [formData.freightCost, formData.extraCosts, formData.fines]);
+
+    // CÁLCULOS DE PRORRATEO
+    const totalBoxes = useMemo(() => {
+        if (!report) return 1;
+        const sum = report.products?.reduce((acc: number, p: any) => acc + Number(p.realQty || p.quantity || 0), 0) || 0;
+        return sum > 0 ? sum : (Number(report.totalRealBoxes) || 1);
+    }, [report]);
+
+    const costPerBox = useMemo(() => {
+        return totalBoxes > 0 ? (finalFreight / totalBoxes) : 0;
+    }, [finalFreight, totalBoxes]);
+
+    const isConsolidated = useMemo(() => {
+        return report?.clientIds && report.clientIds.length > 1;
+    }, [report]);
 
     const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -131,28 +143,24 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
 
         setUploadingPdf(true);
         try {
-            // Nombre único para el archivo, usando el ID del reporte
             const fileExt = file.name.split('.').pop();
             const fileName = `factura_${report.tripId}_${Date.now()}.${fileExt}`;
             const filePath = `facturas_operadores/${fileName}`;
 
-            // Subimos al bucket 'documentos' de Supabase
             const { error: uploadError } = await supabase.storage
                 .from('documentos')
                 .upload(filePath, file);
 
             if (uploadError) throw uploadError;
 
-            // Obtenemos la URL pública para leer el archivo
             const { data: { publicUrl } } = supabase.storage
                 .from('documentos')
                 .getPublicUrl(filePath);
 
-            // Actualizamos nuestro formulario local
             setFormData(prev => ({ 
                 ...prev, 
                 invoiceUrl: publicUrl,
-                invoiceReceived: true // Marcamos automáticamente que ya se recibió
+                invoiceReceived: true 
             }));
             
             addNotification({ type: 'success', title: 'PDF Subido', message: 'Factura anexada al expediente.' });
@@ -166,7 +174,6 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
     };
 
     const handleRemovePdf = () => {
-        // Podríamos eliminarlo del storage, pero por seguridad, solo lo desvinculamos de la BD
         setFormData(prev => ({ ...prev, invoiceUrl: '', invoiceReceived: false }));
     };
 
@@ -230,7 +237,11 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                                 <p className="text-xs font-bold text-text-primary mt-1">{new Date(report.departureDateTime).toLocaleString()}</p>
                                 
                                 <span className={labelClass + " mt-4"}>Destino y Arribo</span>
-                                <p className="text-sm font-black text-emerald-600 uppercase">{clientes.find(c => c.id === report.clientId)?.nombre || 'S/D'}</p>
+                                <p className="text-sm font-black text-emerald-600 uppercase">{
+                                    report.clientIds && report.clientIds.length > 0 
+                                        ? report.clientIds.map(cid => clientes.find(c => c.id === cid)?.nombre).filter(Boolean).join(' | ')
+                                        : (clientes.find(c => c.id === report.clientId)?.nombre || 'S/D')
+                                }</p>
                                 <p className="text-xs font-bold text-text-primary mt-1">{report.arrivalDateTime ? new Date(report.arrivalDateTime).toLocaleString() : 'Pendiente Arribo'}</p>
                             </div>
                             
@@ -240,21 +251,12 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                                 <p className="text-xs font-bold text-text-secondary mt-1">{report.driverName || 'S/A'}</p>
                             </div>
 
-                            <div className="bg-white p-4 rounded-2xl border border-border shadow-sm">
-                                <span className={labelClass}>Identificador de Carga</span>
-                                <div className="flex justify-between items-center">
-                                    <span className="text-[10px] font-black text-primary bg-primary/5 px-2 py-0.5 rounded">LOTE: {report.loteOriginalId?.substring(0,8).toUpperCase() || 'S/A'}</span>
-                                    <span className="text-[10px] font-black text-accent bg-accent/5 px-2 py-0.5 rounded">REMISIÓN: {report.tripId}</span>
-                                </div>
-                            </div>
-
                             <div>
                                 <label className={labelClass}>Comentarios / Incidencias</label>
                                 <textarea 
                                     className={`${inputClass} h-40 text-xs font-mono`}
                                     value={incidentCostsLog + formData.comments}
                                     onChange={e => {
-                                        // Si el usuario edita, removemos el log para que no se duplique al guardar
                                         const newVal = e.target.value;
                                         const cleanVal = newVal.replace(incidentCostsLog, '');
                                         setFormData({...formData, comments: cleanVal});
@@ -296,12 +298,58 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                             </div>
                             <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-200 text-center shadow-inner mt-6">
                                 <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-2 block">Cálculo de Flete Final</span>
-                                <p className="text-4xl font-black text-emerald-600">${finalFreight.toLocaleString(en-US, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                <p className="text-4xl font-black text-emerald-600">${finalFreight.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                             </div>
+
+                            {/* SECCIÓN DE PRORRATEO (SOLO SI ES CONSOLIDADO) */}
+                            {isConsolidated && (
+                                <div className="bg-blue-50 p-4 rounded-3xl border border-blue-200 shadow-sm animate-fade-in">
+                                    <div className="flex justify-between items-center mb-3 border-b border-blue-100 pb-2">
+                                        <h5 className="text-[10px] font-black text-blue-900 uppercase tracking-widest flex items-center gap-1">
+                                            <BoxIcon className="w-3.5 h-3.5" /> Prorrateo Multicliente
+                                        </h5>
+                                        <div className="text-right">
+                                            <span className="block text-[8px] font-black text-blue-600 uppercase">Costo X Caja</span>
+                                            <span className="text-xs font-black text-blue-800">${costPerBox.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                                        {report.products?.map((p: any, i: number) => {
+                                            const spec = productos.find(s => s.id === (p.productId || p.product_id));
+                                            const prodName = spec?.nombreDelProducto || p.manualProductName || 'S/D';
+                                            const qty = Number(p.realQty || p.quantity || 0);
+                                            const share = qty * costPerBox;
+                                            
+                                            return (
+                                                <div key={i} className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-blue-100 shadow-sm text-[10px]">
+                                                    <div className="flex flex-col flex-1 min-w-0 pr-2">
+                                                        <span className="font-black text-primary uppercase truncate">{prodName}</span>
+                                                        <span className="text-[8px] font-bold text-text-muted uppercase">Origen: {p.sourceLotId || p.mid || 'Manual'}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 shrink-0">
+                                                        <span className="font-black text-blue-700 bg-blue-100/50 px-2 py-0.5 rounded">{qty} CJS</span>
+                                                        <span className="font-black text-emerald-600 w-16 text-right">${share.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-2 gap-4 mt-6">
                                 <div>
-                                    <label className={labelClass}>Paga flete</label>
-                                    <input type="text" className={inputClass} value={formData.freightPayer} onChange={e => setFormData({...formData, freightPayer: e.target.value.toUpperCase()})} />
+                                    <label className={labelClass}>¿Quién paga el flete?</label>
+                                    <select 
+                                        className={inputClass} 
+                                        value={formData.freightPayer} 
+                                        onChange={e => setFormData({...formData, freightPayer: e.target.value.toUpperCase()})}
+                                    >
+                                        <option value="NGLOBAL">NGLOBAL</option>
+                                        <option value="CLIENTE (COBRO EN DESTINO)">CLIENTE (COBRO EN DESTINO)</option>
+                                        <option value="OTRO">OTRO TERCERO</option>
+                                    </select>
                                 </div>
                                 <div>
                                     <label className={labelClass}>Revisó (ID)</label>
@@ -316,7 +364,6 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                         <h4 className="text-xs font-black text-primary uppercase border-b border-primary/10 pb-2">Control Administrativo</h4>
                         <div className="space-y-4">
                             
-                            {/* ZONA DE CARGA DE FACTURA PDF */}
                             <div>
                                 <label className={labelClass}>Factura PDF del Transportista</label>
                                 <input 

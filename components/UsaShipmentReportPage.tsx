@@ -567,13 +567,21 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         },
         {
             header: "ORIGEN-DESTINO",
-            accessor: (r) => (
-                <div className="flex items-center gap-2 text-[10px] font-bold">
-                    <span className="text-primary uppercase truncate max-w-[120px]" title={r.project}>{r.project || 'S/D'}</span>
-                    <span className="text-text-muted">&rarr;</span>
-                    <span className="text-success uppercase truncate max-w-[100px]">{clientes.find(c => c.id === r.clientId)?.nombre || 'S/D'}</span>
-                </div>
-            )
+            accessor: (r) => {
+                // Leer múltiples clientes
+                let clientsStr = clientes.find(c => c.id === r.clientId)?.nombre || 'S/D';
+                if (r.clientIds && r.clientIds.length > 0) {
+                    clientsStr = r.clientIds.map(cid => clientes.find(c => c.id === cid)?.nombre).filter(Boolean).join(' | ');
+                }
+
+                return (
+                    <div className="flex items-center gap-2 text-[10px] font-bold">
+                        <span className="text-primary uppercase truncate max-w-[120px]" title={r.project}>{r.project || 'S/D'}</span>
+                        <span className="text-text-muted">&rarr;</span>
+                        <span className="text-success uppercase truncate max-w-[140px]" title={clientsStr}>{clientsStr}</span>
+                    </div>
+                );
+            }
         },
         {
             header: "Calendario (S/L)",
