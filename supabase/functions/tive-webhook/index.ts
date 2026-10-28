@@ -1,6 +1,23 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+const formatTransitTime = (departureStr?: string) => {
+    if (!departureStr) return 'S/D';
+    const start = new Date(departureStr).getTime();
+    const now = new Date().getTime(); 
+    const diffMs = now - start;
+
+    if (diffMs < 0) return '0 h';
+
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHrs = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+    if (diffDays > 0) {
+        return `${diffDays} día${diffDays > 1 ? 's' : ''}, ${diffHrs} h`;
+    }
+    return `${diffHrs} h`;
+};
+
 async function enviarWhatsApp(supabase: any, templateName: string, params: string[]) {
     const { data: recipients } = await supabase.from('alert_recipients').select('*');
     const mxDate = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
@@ -44,8 +61,6 @@ async function enviarWhatsApp(supabase: any, templateName: string, params: strin
         const phoneId = Deno.env.get('phone_number_id_wpp');
         const accessToken = Deno.env.get('whatsapp_token_');
 
-        // Meta rechaza los mensajes si las variables contienen saltos de línea (\n).
-        // La plantilla de Meta ya tiene la estructura vertical, aquí solo mandamos el texto limpio.
         const limpiarTexto = (texto: string) => String(texto || 'S/D').replace(/[\t\r\n⦁]/g, ' ').replace(/ {2,}/g, ' ').trim();
         const cleanParams = params.map(p => ({ type: "text", text: limpiarTexto(p) }));
 
@@ -88,20 +103,18 @@ async function enviarWhatsApp(supabase: any, templateName: string, params: strin
     }
 }
 
-// Función auxiliar para extraer los datos relacionales del viaje
 async function getRichData(supabase: any, tripRecord: any) {
     let clientName = 'S/D';
     let carrierName = 'S/D';
     let productDetails = 'S/D';
     let invoiceNumbers = 'S/D';
 
-    // 1. Obtener Nombre del Cliente (Soporte Multicliente)
     if (tripRecord?.client_ids && tripRecord.client_ids.length > 0) {
         const { data } = await supabase.from('usa_clientes').select('nombre').in('id', tripRecord.client_ids);
         if (data && data.length > 0) {
             clientName = data.map(c => c.nombre).join(' | ');
         }
-    } else if (tripRecord?.client_id) { // Respaldo para viajes antiguos
+    } else if (tripRecord?.client_id) { 
         const { data } = await supabase.from('usa_clientes').select('nombre').eq('id', tripRecord.client_id).single();
         if (data) clientName = data.nombre;
     }
@@ -124,7 +137,6 @@ async function getRichData(supabase: any, tripRecord: any) {
             if (inv) invoices.push(inv);
         }
         
-        // Usamos Set para eliminar valores duplicados antes de unirlos con " | "
         if (productNames.length > 0) {
             productDetails = [...new Set(productNames)].join(' | ');
         }
@@ -140,7 +152,8 @@ async function getRichData(supabase: any, tripRecord: any) {
         productDetails,
         carrierName,
         driverName: tripRecord?.driver_name || 'S/D',
-        driverPhone: tripRecord?.driver_phone || 'S/D' 
+        driverPhone: tripRecord?.driver_phone || 'S/D',
+        realDeparture: tripRecord?.real_departure_date || tripRecord?.departure_date_time
     };
 }
 
@@ -167,19 +180,23 @@ serve(async (req) => {
             return new Response(JSON.stringify({ success: true }), { status: 200 });
         }
         
-        const trackerId = payload.record.tive_tracker_id;
-        let lat = null, lng = null;
-        if (trackerId) {
-            const { data: lastLocation } = await supabase.from('tive_events').select('lat, lng').eq('tracker_id', trackerId).not('lat', 'is', null).order('timestamp', { ascending: false }).limit(1).single();
-            if (lastLocation) { lat = lastLocation.lat; lng = lastLocation.lng; }
+        const trackerId = payload.record.tive_tracker_id || 'S/D';
+        let lat = null, lng = null, lastTemp = null;
+        if (trackerId !== 'S/D') {
+            const { data: lastLocation } = await supabase.from('tive_events').select('lat, lng, temperature').eq('tracker_id', trackerId).not('lat', 'is', null).order('timestamp', { ascending: false }).limit(1).single();
+            if (lastLocation) { lat = lastLocation.lat; lng = lastLocation.lng; lastTemp = lastLocation.temperature; }
         }
         
         const motivoTexto = payload.type === 'INSERT' ? `🚀 NUEVO VIAJE: ${newStatus}` : `🟢 NUEVO ESTATUS: ${newStatus}`;
-        const baseDetails = lat && lng ? `Ubicación GPS: https://maps.google.com/?q=${lat},${lng}` : `Actualizado desde plataforma (Sin GPS).`;
-        
         const richData = await getRichData(supabase, payload.record);
         
-        // Orden exacto de las variables {{1}} a la {{9}} en Meta
+        const transitTime = formatTransitTime(richData.realDeparture);
+        const mapUrl = lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : 'Sin GPS actual';
+        const tempText = lastTemp ? `${lastTemp.toFixed(1)}°F` : 'S/D';
+        
+        // El detalle extra (param 8) ahora solo muestra la info adicional (como el GPS)
+        const baseDetails = `Ubicación GPS: ${mapUrl}`;
+        
         const templateParams = [
             richData.tripId,          // {{1}}
             richData.invoiceNumbers,  // {{2}}
@@ -189,11 +206,13 @@ serve(async (req) => {
             richData.driverName,      // {{6}}
             motivoTexto,              // {{7}}
             baseDetails,              // {{8}}
-            richData.driverPhone      // {{9}}
+            richData.driverPhone,     // {{9}}
+            trackerId,                // {{10}}
+            transitTime,              // {{11}}
+            tempText                  // {{12}}
         ];
 
-        // Cambiamos al nombre de tu nueva plantilla V3
-        await enviarWhatsApp(supabase, "alerta_despacho_v3", templateParams);
+        await enviarWhatsApp(supabase, "alerta_despacho_v2", templateParams);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
@@ -202,8 +221,6 @@ serve(async (req) => {
     // =========================================================
     const trackerId = payload.DeviceName || payload.EntityName || payload.tracker?.id || payload.trackerId || payload.alert?.trackerId || payload.shipment?.trackerId;
     if (!trackerId) return new Response(JSON.stringify({ success: true }), { status: 200 });
-
-    console.log(`📡 Ping recibido de Tive [Tracker: ${trackerId}]`);
 
     const rawAlertType = payload.alert?.type || payload.type || payload.alertType || 'NORMAL';
     const alertType = String(rawAlertType).toLowerCase();
@@ -214,10 +231,6 @@ serve(async (req) => {
     const activeTrip = (activeUsa && activeUsa.length > 0) ? activeUsa[0] : ((activeNac && activeNac.length > 0) ? activeNac[0] : null);
 
     if (!activeTrip) return new Response(JSON.stringify({ success: true }), { status: 200 });
-
-    if (alertType !== 'normal' && alertType !== 'ping' || hasAlertObject) {
-        console.log(`⚠ ALERTA DETECTADA [Tracker: ${trackerId}]: ${alertType}`);
-    }
 
     const tempF = payload.Temperature?.Fahrenheit ?? payload.temperature ?? null;
     const hum = payload.Humidity?.Percentage ?? null;
@@ -239,32 +252,32 @@ serve(async (req) => {
     const isTemp = alertType.includes('temperature') || alertType.includes('temp') || stringifiedPayload.includes('"type":"temperature"');
 
     const requiresNotification = isDeviation || isTemp || isStopAlert;
-
     if (!requiresNotification) return new Response(JSON.stringify({ success: true }), { status: 200 });
 
     const currentStatus = String(activeTrip.logistic_status).toUpperCase();
     if (currentStatus === 'HOLD FDA' || currentStatus === 'REVIEW FDA') {
-        console.log(`🔇 ALERTA SILENCIADA [Tracker: ${trackerId}]: El viaje ${activeTrip.trip_id} está en ${currentStatus}.`);
         return new Response(JSON.stringify({ success: true }), { status: 200 });
     }
 
+    const richData = await getRichData(supabase, activeTrip);
+    const transitTime = formatTransitTime(richData.realDeparture);
+    const gpsUrl = lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : 'Sin GPS';
+    const currentTempStr = tempF !== null ? `${tempF.toFixed(1)}°F` : 'S/D';
+
     let motivoTexto = "Notificación de Sistema";
-    let baseDetails = "Revisar plataforma.";
+    let baseDetails = `Revisar plataforma para más detalles.`;
 
     if (isTemp) {
         motivoTexto = "🌡️ ALERTA: TEMPERATURA";
-        baseDetails = `Temperatura actual: ${tempF ? tempF.toFixed(1) : 'N/D'}°F. Valores fuera de los parámetros.`;
+        baseDetails = `La temperatura se encuentra fuera de los parámetros permitidos.`;
     } else if (isDeviation) {
         motivoTexto = "📍 ALERTA: DESVÍO";
-        baseDetails = `Desviación de ruta/geocerca. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        baseDetails = `Desviación de ruta/geocerca registrada. Mapa: ${gpsUrl}`;
     } else if (isStopAlert) {
         motivoTexto = "⏱️ ALERTA: PARADA PROLONGADA";
-        baseDetails = `El envío se detuvo más de lo permitido. Mapa: https://maps.google.com/?q=${lat},${lng}`;
+        baseDetails = `El envío se detuvo más de lo permitido. Mapa: ${gpsUrl}`;
     }
-
-    const richData = await getRichData(supabase, activeTrip);
     
-    // Orden exacto de las variables {{1}} a la {{9}} en Meta
     const templateParams = [
         richData.tripId,          // {{1}}
         richData.invoiceNumbers,  // {{2}}
@@ -274,11 +287,13 @@ serve(async (req) => {
         richData.driverName,      // {{6}}
         motivoTexto,              // {{7}}
         baseDetails,              // {{8}}
-        richData.driverPhone      // {{9}} -> El teléfono del operador
+        richData.driverPhone,     // {{9}}
+        trackerId,                // {{10}}
+        transitTime,              // {{11}}
+        currentTempStr            // {{12}}
     ];
 
-    // Cambiamos al nombre de tu nueva plantilla V3
-    await enviarWhatsApp(supabase, "alerta_despacho_v3", templateParams);
+    await enviarWhatsApp(supabase, "alerta_despacho_v2", templateParams);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
 
   } catch (error) {
