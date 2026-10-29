@@ -622,22 +622,33 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             accessor: (r) => {
                 const live = latestTiveData[r.id];
                 
-                // 1. Extraer límites dinámicos desde la BD (con valores de respaldo)
-                const minTemp = Number(r.min_temp || 45.0);
-                const maxTemp = Number(r.temperature || r.idealTemp || 51.0);
+                // 1. Extraer los datos del producto asociado para obtener los nuevos rangos
+                let minTemp = 45.0; // Valor por defecto
+                let maxTemp = 51.0; // Valor por defecto
                 
-                // 2. Calcular la temperatura óptima (Promedio)
-                const optimaTemp = ((minTemp + maxTemp) / 2).toFixed(1);
+                if (r.products && r.products.length > 0) {
+                    const mainPid = r.products[0].productId || r.products[0].product_id;
+                    const mainSpec = productSpecs.find(s => s.id === mainPid);
+                    
+                    if (mainSpec) {
+                        minTemp = Number(mainSpec.tempOptima || 45.0); // tempOptima ahora es el valor Mínimo
+                        maxTemp = Number(mainSpec.limiteSuperior || 51.0); // limiteSuperior ahora es el valor Máximo
+                    }
+                }
                 
-                // 3. Evaluar alerta si la temperatura real se sale del rango exacto
+                // Si el viaje tiene valores manuales sobrescritos en usa_shipment_reports, se respetan esos
+                if (r.min_temp !== undefined && r.min_temp !== null) minTemp = Number(r.min_temp);
+                if (r.idealTemp !== undefined && r.idealTemp !== null) maxTemp = Number(r.idealTemp);
+                
+                // 2. Evaluar alerta si la temperatura real se sale del rango exacto
                 const hasExcursion = live?.temp && (Number(live.temp) < minTemp || Number(live.temp) > maxTemp);
                 
                 return (
-                    <div className="flex items-center gap-2">
-                        <span className={`text-[11px] font-black ${hasExcursion ? 'text-danger animate-pulse' : 'text-primary'}`}>
+                    <div className="flex flex-col justify-center">
+                        <span className={`text-[12px] font-black ${hasExcursion ? 'text-danger animate-pulse' : 'text-primary'}`}>
                             {live?.temp ? `${live.temp.toFixed(1)}°F` : '--°F'}
                         </span>
-                        <span className="text-[9px] font-bold text-text-muted">/ {optimaTemp}°F</span>
+                        <span className="text-[9px] font-bold text-text-muted">Rango: {minTemp}°F - {maxTemp}°F</span>
                     </div>
                 );
             }
