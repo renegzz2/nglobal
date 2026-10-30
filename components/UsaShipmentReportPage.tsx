@@ -112,6 +112,12 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         });
     };
 
+    // SOLUCIÓN: Agregada validación segura con user?.role
+    const canManageShipments = useMemo(() => {
+        if (!user || !user.role) return false;
+        return [UserRole.COORDINADOR, UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO, UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role);
+    }, [user]);
+
     const ensureShipmentWriteAccess = () => {
         if (canManageShipments) return true;
         addNotification({
@@ -121,7 +127,6 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         });
         return false;
     };
-    const canManageShipments = [UserRole.COORDINADOR, UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO, UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role);
 
     const handleViewChange = (newView: 'active' | 'completed') => { setView(newView); };
 
@@ -1066,7 +1071,10 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
             )}
 
             {isFormOpen && <UsaShipmentForm isOpen={isFormOpen} onClose={handleCloseForm} onSubmit={handleSubmit} initialData={reports.find(r => r.id === selectedReportId) || null} productSpecs={productSpecs} proyectos={proyectos} logisticStatuses={logisticStatuses} clientes={clientes} tiposUnidad={tiposUnidad} escalas={escalas} responsables={responsables} />}
-            {isDetailsModalOpen && <ShipmentDetailsModal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} report={reports.find(r => r.id === reportIdForDetails)!} productSpecs={productSpecs} proyectos={proyectos} clientes={clientes} logisticStatuses={logisticStatuses} onCompleteTrip={setReportToComplete} onRefresh={fetchData} />}
+            
+            {/* LÍNEA MODIFICADA AQUÍ PARA PASAR "lineas={lineas}" */}
+            {isDetailsModalOpen && <ShipmentDetailsModal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} report={reports.find(r => r.id === reportIdForDetails)!} productSpecs={productSpecs} proyectos={proyectos} clientes={clientes} logisticStatuses={logisticStatuses} lineas={lineas} onCompleteTrip={setReportToComplete} onRefresh={fetchData} />}
+            
             {isIncidentModalOpen && reportForIncident && <IncidentModal isOpen={isIncidentModalOpen} onClose={() => setIsIncidentModalOpen(false)} report={reportForIncident} logisticStatuses={logisticStatuses} onUpdate={fetchData} />}
             {reportToRate && (
                 <CarrierRatingModal

@@ -295,8 +295,17 @@ const BaseDeDatosPage: React.FC<BaseDeDatosPageProps> = ({ user }) => {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase.from(currentSubTabInfo.table).select('*').order('created_at', { ascending: false });
+            // 1. Iniciamos la consulta base
+            let query = supabase.from(currentSubTabInfo.table).select('*');
+            
+            // 2. Si estamos en productos, filtramos solo los activos
+            if (currentSubTabInfo.table === 'usa_productos') {
+                query = query.eq('activo', true);
+            }
+            
+            const { data, error } = await query.order('created_at', { ascending: false });
             if (error) throw error;
+            
             setTableData(toCamelCase(data) as DataItem[]);
 
             if (activeSubTabKey === 'productos' && activeMainTabKey === 'estados_unidos') {
@@ -304,7 +313,7 @@ const BaseDeDatosPage: React.FC<BaseDeDatosPageProps> = ({ user }) => {
             }
             
             if (activeSubTabKey !== 'productos' && activeMainTabKey === 'estados_unidos') {
-                const { data: prods } = await supabase.from('usa_productos').select('*');
+                const { data: prods } = await supabase.from('usa_productos').select('*').eq('activo', true);
                 if (prods) setAllProducts(toCamelCase(prods) as ProductoDB[]);
             }
 
@@ -486,9 +495,18 @@ const BaseDeDatosPage: React.FC<BaseDeDatosPageProps> = ({ user }) => {
         if (!ensureDatabaseWriteAccess()) return;
         if (!itemToDelete) return;
         try {
-            const { error } = await supabase.from(currentSubTabInfo.table).delete().eq('id', (itemToDelete as any).id);
-            if (error) throw error;
+            if (currentSubTabInfo.table === 'usa_productos') {
+                // Inhabilitar producto (Soft Delete) para proteger el historial
+                const { error } = await supabase.from(currentSubTabInfo.table).update({ activo: false }).eq('id', (itemToDelete as any).id);
+                if (error) throw error;
+            } else {
+                // Borrado físico normal para las demás tablas
+                const { error } = await supabase.from(currentSubTabInfo.table).delete().eq('id', (itemToDelete as any).id);
+                if (error) throw error;
+            }
             fetchData();
+        } catch (error: any) {
+             addNotification({ type: 'danger', title: 'Error', message: 'No se pudo eliminar el registro.' });
         } finally {
             handleCloseDeleteModal();
         }

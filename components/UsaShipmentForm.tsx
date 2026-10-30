@@ -169,6 +169,14 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     isOpen, onClose, onSubmit, initialData, liderData, productSpecs, proyectos, logisticStatuses, clientes, tiposUnidad, escalas, responsables
 }) => {
     const { addNotification } = useNotification();
+    
+    // FILTRADO DINÁMICO DE PRODUCTOS ACTIVOS
+    const activeProducts = useMemo(() => {
+        // En caso de que la propiedad activo sea null o undefined, asumimos true. 
+        // Solo descartamos los explícitamente false.
+        return productSpecs.filter(p => p.activo !== false);
+    }, [productSpecs]);
+
     const [baseData, setBaseData] = useState({
         tripId: '',
         project: '',
@@ -903,11 +911,20 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                             {baseData.products.map((p) => {
                                                 const spec = productSpecs.find(s => s.id === p.productId);
                                                 const isManualProduct = p.productId === MANUAL_PRODUCT_OPTION;
+                                                
+                                                // Mostrar el nombre agrupado cuando ya está seleccionado (y no es manual)
+                                                let displaySpecName = 'SIN DESCRIPCIÓN';
+                                                if (spec) {
+                                                    const alias = spec.aliasUsa ? ` | Calidad: ${spec.aliasUsa}` : '';
+                                                    const config = spec.configUsa ? ` | Config: ${spec.configUsa}` : '';
+                                                    displaySpecName = `${spec.nombreDelProducto}${alias}${config}`;
+                                                }
+
                                                 return (
                                                     <tr key={p.id} className={`group transition-colors ${isManualProduct ? 'bg-orange-50 hover:bg-orange-100/70' : 'hover:bg-primary/[0.02]'}`}>
                                                         <td className={`px-6 py-3 font-bold uppercase truncate max-w-[180px] ${isManualProduct ? 'text-orange-700' : 'text-text-primary'}`}>
                                                             {p.productId && !isManualProduct ? (
-                                                                spec?.nombreDelProducto || 'SIN DESCRIPCIÓN'
+                                                                <span title={displaySpecName}>{displaySpecName}</span>
                                                             ) : (
                                                                 <>
                                                                 <select
@@ -917,9 +934,15 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                                 >
                                                                     <option value="">Seleccionar...</option>
                                                                     <option value={MANUAL_PRODUCT_OPTION}>+ Producto no registrado</option>
-                                                                    {productSpecs.map(s => (
-                                                                        <option key={s.id} value={s.id}>{s.nombreDelProducto}</option>
-                                                                    ))}
+                                                                    {activeProducts.map(s => {
+                                                                        const alias = s.aliasUsa ? ` | Calidad: ${s.aliasUsa}` : '';
+                                                                        const config = s.configUsa ? ` | Config: ${s.configUsa}` : '';
+                                                                        const displayName = `${s.nombreDelProducto}${alias}${config}`;
+                                                                        
+                                                                        return (
+                                                                            <option key={s.id} value={s.id}>{displayName}</option>
+                                                                        );
+                                                                    })}
                                                                 </select>
                                                                 {isManualProduct && (
                                                                     <input

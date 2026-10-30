@@ -45,7 +45,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         }
     };
 
-    // CONSOLIDACIÓN DE CLIENTES PARA MOSTRAR
     const destClientsStr = useMemo(() => {
         let str = clientes.find(c => c.id === report.clientId)?.nombre || 'S/D';
         if (report.clientIds && report.clientIds.length > 0) {
@@ -70,7 +69,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-4 backdrop-blur-md">
             <div className="bg-background rounded-[2rem] shadow-2xl w-[95vw] md:max-w-6xl h-[85vh] flex flex-col border border-border overflow-hidden animate-slide-up">
                 
-                {/* CABECERA ROBUSTA */}
                 <div className="bg-primary text-white p-6 shrink-0 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-8 opacity-[0.03] pointer-events-none scale-150 transform translate-x-10 -translate-y-10">
                         <TruckIcon className="w-full h-full" />
@@ -121,10 +119,8 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                     </div>
                 </div>
 
-                {/* CONTENIDO DEL MODAL */}
                 <div className="flex-1 overflow-y-auto p-6 flex gap-6 bg-surface-secondary/30">
                     
-                    {/* PANEL IZQUIERDO: DINÁMICO POR PESTAÑA */}
                     <div className="flex-1 flex flex-col gap-6">
                         {activeTab === 'carga' && (
                             <>
@@ -137,7 +133,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                     <div className="border border-border rounded-2xl overflow-hidden">
                                         <div className="bg-gray-50 px-4 py-3 border-b border-border flex justify-between items-center">
                                             <span className="text-[10px] font-black text-text-muted uppercase tracking-widest flex items-center gap-2">
-                                                <BoxIcon className="w-4 h-4" /> Detalles de la Carga
+                                                Detalles de la Carga
                                             </span>
                                             <span className="text-[10px] font-bold text-text-muted">{report.products?.length || 0} Partidas</span>
                                         </div>
@@ -153,9 +149,18 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                             <tbody className="divide-y divide-border bg-white">
                                                 {report.products?.map((p:any, i:number) => {
                                                     const spec = productSpecs.find(s => s.id === (p.productId || p.product_id));
+                                                    
+                                                    // --- LÓGICA DE CONCATENACIÓN ---
+                                                    let displayProductName = p.manualProductName || p.manual_product_name || 'SIN DESCRIPCIÓN';
+                                                    if (spec) {
+                                                        const alias = spec.aliasUsa ? ` | Alias: ${spec.aliasUsa}` : '';
+                                                        const config = spec.configUsa ? ` | Config: ${spec.configUsa}` : '';
+                                                        displayProductName = `${spec.nombreDelProducto}${alias}${config}`;
+                                                    }
+
                                                     return (
                                                         <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                                            <td className="px-4 py-3 font-bold text-primary uppercase">{spec?.nombreDelProducto || p.manualProductName || p.manual_product_name || 'S/D'}</td>
+                                                            <td className="px-4 py-3 font-bold text-primary uppercase" title={displayProductName}>{displayProductName}</td>
                                                             <td className="px-4 py-3 text-text-secondary font-mono">{p.invoiceNumber || 'S/D'}</td>
                                                             <td className="px-4 py-3 font-black text-primary text-center bg-primary/5">{p.quantity || p.cantidad || p.realQty || 0}</td>
                                                             <td className="px-4 py-3 text-text-secondary text-center font-mono text-[10px]">{p.mid || p.sourceLotId || '-'}</td>
@@ -177,18 +182,19 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                         <h4 className="text-[10px] font-black text-text-muted uppercase tracking-widest mb-4 flex items-center gap-2">
                                             <ShieldCheckIcon className="w-4 h-4 text-emerald-500" /> Parámetros Térmicos DB
                                         </h4>
-                                        <div className="flex justify-between items-center gap-4">
-                                            <div className="flex-1 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-center">
-                                                <span className="block text-[9px] font-black text-emerald-700 uppercase tracking-widest mb-1">Óptima</span>
-                                                <span className="text-2xl font-black text-emerald-600">{thermalAverages.optima}°F</span>
+                                        {/* --- AJUSTE DE DISEÑO: Grid estricto y padding reducido --- */}
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5 flex flex-col justify-center items-center text-center">
+                                                <span className="block text-[8px] font-black text-emerald-700 uppercase tracking-widest mb-1">Óptima</span>
+                                                <span className="text-lg font-black text-emerald-600">{thermalAverages.optima}°F</span>
                                             </div>
-                                            <div className="flex-1 bg-blue-50 border border-blue-100 rounded-2xl p-4 text-center">
-                                                <span className="block text-[9px] font-black text-blue-700 uppercase tracking-widest mb-1">Mínima</span>
-                                                <span className="text-xl font-black text-blue-600">{thermalAverages.min}°F</span>
+                                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-2.5 flex flex-col justify-center items-center text-center">
+                                                <span className="block text-[8px] font-black text-blue-700 uppercase tracking-widest mb-1">Mínima</span>
+                                                <span className="text-base font-black text-blue-600">{thermalAverages.min}°F</span>
                                             </div>
-                                            <div className="flex-1 bg-red-50 border border-red-100 rounded-2xl p-4 text-center">
-                                                <span className="block text-[9px] font-black text-red-700 uppercase tracking-widest mb-1">Máxima</span>
-                                                <span className="text-xl font-black text-red-600">{thermalAverages.max}°F</span>
+                                            <div className="bg-red-50 border border-red-100 rounded-xl p-2.5 flex flex-col justify-center items-center text-center">
+                                                <span className="block text-[8px] font-black text-red-700 uppercase tracking-widest mb-1">Máxima</span>
+                                                <span className="text-base font-black text-red-600">{thermalAverages.max}°F</span>
                                             </div>
                                         </div>
                                     </div>
@@ -215,7 +221,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                 </div>
                             </>
                         )}
-                        {/* OTROS TABS (Térmico, Mapa, Bitácora) SE MANTIENEN IGUAL... */}
                         {activeTab !== 'carga' && (
                             <div className="bg-white rounded-3xl p-6 border border-border shadow-sm flex-1 flex items-center justify-center">
                                 <p className="text-text-muted font-bold text-sm">Contenido de la pestaña {activeTab} en desarrollo.</p>
@@ -223,7 +228,6 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                         )}
                     </div>
 
-                    {/* PANEL DERECHO: FICHA LOGÍSTICA FIJA */}
                     <div className="w-80 bg-white rounded-3xl border border-border shadow-sm p-6 overflow-y-auto custom-scrollbar shrink-0">
                         <h4 className="text-[10px] font-black text-primary uppercase tracking-widest mb-6 flex items-center gap-2">
                             <TruckIcon className="w-4 h-4" /> Ficha de Transporte
@@ -232,13 +236,12 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                         <div className="space-y-6">
                             <div>
                                 <span className="block text-[9px] font-black text-text-muted uppercase tracking-widest mb-1">Línea Transportista</span>
-                                <span className="text-sm font-black text-primary uppercase">{formatCarrierName(report.lineaTransportistaId ? (lineas || []).find(l => l.id === report.lineaTransportistaId)?.nombre : 'Línea Externa')}</span>
+                                <span className="text-sm font-black text-primary uppercase">{report.lineaTransportistaId || 'Línea Asignada'}</span>
                             </div>
 
                             <div className="bg-gray-50 p-3 rounded-xl border border-border">
                                 <span className="block text-[9px] font-black text-text-muted uppercase tracking-widest mb-1">Operador a Cargo</span>
                                 <span className="text-xs font-black text-primary uppercase block mb-1">{report.driverName || 'S/A'}</span>
-                                <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1"><PhoneIcon className="w-3 h-3"/> {report.driverPhone || 'S/A'}</span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
