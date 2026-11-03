@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { Productor, Huerta } from '../types';
 
+// Interfaces adaptadas a tu base de datos
 interface ProductoBD {
     id: string;
     nombre: string;
@@ -16,6 +16,17 @@ interface DanoBD {
     grado: 'MENOR' | 'MAYOR' | 'CRITICO';
 }
 
+interface ProductorBD {
+    id: string;
+    nombre_productor: string;
+}
+
+interface HuertaBD {
+    id: string;
+    nombre_huerta: string;
+    mid?: string;
+}
+
 export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
     const [loadingData, setLoadingData] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -23,8 +34,8 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
     // Listas dinámicas desde Supabase
     const [productos, setProductos] = useState<ProductoBD[]>([]);
     const [catalogoDanos, setCatalogoDanos] = useState<DanoBD[]>([]);
-    const [productores, setProductores] = useState<Productor[]>([]);
-    const [huertas, setHuertas] = useState<Huerta[]>([]);
+    const [productores, setProductores] = useState<ProductorBD[]>([]);
+    const [huertas, setHuertas] = useState<HuertaBD[]>([]);
 
     // Estados del formulario
     const [productoSeleccionadoId, setProductoSeleccionadoId] = useState<string>('');
@@ -42,19 +53,25 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         const fetchCatalogos = async () => {
             try {
                 const [resProd, resDanos, resProductores] = await Promise.all([
-                    supabase.from('productos').select('*').eq('condicion', true).order('nombre'),
-                    supabase.from('catalogo_danos').select('*').eq('condicion', true),
-                    supabase.from('productores').select('*').eq('condicion', true).order('nombre_productor')
+                    // Se adapta para leer de usa_productos renombrando la columna al vuelo
+                    supabase.from('usa_productos').select('id, nombre_del_producto, categoria').eq('activo', true).order('nombre_del_producto'),
+                    supabase.from('usa_catalogo_danos').select('*').eq('condicion', true),
+                    supabase.from('usa_productores').select('*').eq('condicion', true).order('nombre_productor')
                 ]);
 
-                if (resProd.data) setProductos(resProd.data);
+                if (resProd.data) {
+                    const mappedProds = resProd.data.map(p => ({
+                        id: p.id,
+                        nombre: p.nombre_del_producto,
+                        categoria: p.categoria
+                    }));
+                    setProductos(mappedProds);
+                    if (mappedProds.length > 0) setProductoSeleccionadoId(mappedProds[0].id);
+                }
+                
                 if (resDanos.data) setCatalogoDanos(resDanos.data);
                 if (resProductores.data) setProductores(resProductores.data);
 
-                // Seleccionar el primer producto por defecto si existe
-                if (resProd.data && resProd.data.length > 0) {
-                    setProductoSeleccionadoId(resProd.data[0].id);
-                }
             } catch (err) {
                 console.error("Error al cargar datos iniciales:", err);
             } finally {
@@ -75,7 +92,7 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
 
         const fetchHuertas = async () => {
             const { data } = await supabase
-                .from('huertas')
+                .from('usa_huertas')
                 .select('*')
                 .eq('productor_id', productorId)
                 .eq('condicion', true)
@@ -107,7 +124,7 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         setPesosDanos(prev => ({ ...prev, [key]: numVal }));
     };
 
-    // Cálculos dinámicos
+    // Cálculos dinámicos de daños y score
     const { detallesDanosJSON, totalPorcentajeDano, calidadScore } = useMemo(() => {
         const detalles: Record<string, { peso: number; porcentaje: number }> = {};
         let sumaPorcentajes = 0;
@@ -132,9 +149,24 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         };
     }, [pesosDanos, tamanoMuestra, danosFiltrados]);
 
+    // Semáforo de Calidad basado en el Score
+    let calidadColor = "text-slate-800";
+    let calidadLabel = "EVALUANDO...";
+
+    if (calidadScore >= 95) {
+        calidadColor = "text-green-600";
+        calidadLabel = "BUENO";
+    } else if (calidadScore >= 85) {
+        calidadColor = "text-yellow-500";
+        calidadLabel = "TOLERABLE";
+    } else {
+        calidadColor = "text-red-600";
+        calidadLabel = "NO TOLERABLE";
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!productorId || !huertaId || !productoActual) {
+        if (!productorId || !huertaId || !productoSeleccionadoId) {
             alert('Por favor completa los campos obligatorios.');
             return;
         }
@@ -143,7 +175,7 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         try {
             const payload = {
                 tipo_inspeccion: tipoInspeccion,
-                producto: productoActual.nombre,
+                producto_id: productoSeleccionadoId,
                 productor_id: productorId,
                 huerta_id: huertaId,
                 tamano_muestra: tamanoMuestra,
@@ -153,7 +185,7 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 observaciones
             };
 
-            const { error } = await supabase.from('inspecciones').insert([payload]);
+            const { error } = await supabase.from('usa_inspecciones').insert([payload]);
             if (error) throw error;
 
             alert('Inspección guardada correctamente');
@@ -168,29 +200,29 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         }
     };
 
-    if (loadingData) return <div className="p-8 text-center text-slate-500">Cargando módulos...</div>;
+    if (loadingData) return <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest text-sm animate-pulse">Cargando catálogos operativos...</div>;
 
     return (
         <form onSubmit={handleSubmit} className="max-w-5xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
             <div className="flex justify-between items-center border-b pb-4">
                 <div>
-                    <h2 className="text-xl font-extrabold text-slate-800">Registro de Inspección Dinámico</h2>
-                    <p className="text-xs text-slate-500">Categoría activa: <span className="font-bold text-blue-600">{productoActual?.categoria || 'N/A'}</span></p>
+                    <h2 className="text-xl font-extrabold text-slate-800 uppercase tracking-tight">Registro de Inspección Dinámico</h2>
+                    <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest">Categoría activa: <span className="font-bold text-blue-600">{productoActual?.categoria || 'N/A'}</span></p>
                 </div>
                 <div className="text-right">
-                    <span className="text-xs text-slate-500 block">Calidad:</span>
-                    <span className="text-2xl font-black text-slate-800">{calidadScore}%</span>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Calidad: {calidadLabel}</span>
+                    <span className={`text-3xl font-black ${calidadColor}`}>{calidadScore}%</span>
                 </div>
             </div>
 
-            {/* Selector de Producto Dinámico */}
+            {/* Selectores Relacionales */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Producto *</label>
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1">Producto *</label>
                     <select 
                         value={productoSeleccionadoId} 
                         onChange={(e) => handleProductoChange(e.target.value)}
-                        className="w-full bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-blue-900"
+                        className="w-full bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 text-xs font-bold text-blue-900 outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
                     >
                         {productos.map(p => (
                             <option key={p.id} value={p.id}>
@@ -201,63 +233,94 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Tipo Inspección</label>
-                    <select value={tipoInspeccion} onChange={(e) => setTipoInspeccion(e.target.value as any)} className="w-full border rounded-lg p-2.5 text-sm">
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1">Tipo Inspección</label>
+                    <select 
+                        value={tipoInspeccion} 
+                        onChange={(e) => setTipoInspeccion(e.target.value as any)} 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
+                    >
                         <option value="ORIGEN">ORIGEN</option>
                         <option value="PT">PRODUCTO TERMINADO</option>
                     </select>
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Productor *</label>
-                    <select value={productorId} onChange={(e) => setProductorId(e.target.value)} required className="w-full border rounded-lg p-2.5 text-sm">
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1">Productor *</label>
+                    <select 
+                        value={productorId} 
+                        onChange={(e) => setProductorId(e.target.value)} 
+                        required 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
+                    >
                         <option value="">-- Seleccionar --</option>
                         {productores.map(p => <option key={p.id} value={p.id}>{p.nombre_productor}</option>)}
                     </select>
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Huerta *</label>
-                    <select value={huertaId} onChange={(e) => setHuertaId(e.target.value)} disabled={!productorId} required className="w-full border rounded-lg p-2.5 text-sm">
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1">Huerta *</label>
+                    <select 
+                        value={huertaId} 
+                        onChange={(e) => setHuertaId(e.target.value)} 
+                        disabled={!productorId} 
+                        required 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 transition-all disabled:opacity-50"
+                    >
                         <option value="">-- Seleccionar --</option>
-                        {huertas.map(h => <option key={h.id} value={h.id}>{h.nombre_huerta}</option>)}
+                        {huertas.map(h => <option key={h.id} value={h.id}>{h.nombre_huerta} {h.mid ? `(${h.mid})` : ''}</option>)}
                     </select>
                 </div>
             </div>
 
-            {/* Muestra */}
-            <div className="bg-slate-50 p-4 rounded-xl border flex justify-between items-center">
+            {/* Muestra y Resultados Rápidos */}
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 flex justify-between items-center">
                 <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Tamaño Muestra</label>
-                    <input type="number" min="1" value={tamanoMuestra} onChange={(e) => setTamanoMuestra(parseFloat(e.target.value) || 1)} className="border p-2 rounded-lg text-sm font-bold" />
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1.5">Tamaño de Muestra Evaluada (Libras/Piezas/Kg)</label>
+                    <input 
+                        type="number" 
+                        min="1" 
+                        value={tamanoMuestra} 
+                        onChange={(e) => setTamanoMuestra(parseFloat(e.target.value) || 1)} 
+                        className="border border-slate-300 px-4 py-2 rounded-xl text-sm font-black w-48 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all" 
+                    />
                 </div>
                 <div className="text-right">
-                    <span className="text-xs text-slate-500 block">% Total Daño:</span>
-                    <span className="text-xl font-black text-rose-600">{totalPorcentajeDano}%</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Tasa Total de Defectos:</span>
+                    <span className="text-2xl font-black text-rose-600">{totalPorcentajeDano}%</span>
                 </div>
             </div>
 
-            {/* Captura de Daños dinámicos por severidad */}
-            <div className="space-y-4">
+            {/* Matriz de Captura de Daños Dinámicos */}
+            <div className="space-y-5">
                 {(['MENOR', 'MAYOR', 'CRITICO'] as const).map(grado => {
                     const deGrado = danosFiltrados.filter(d => d.grado === grado);
                     if (deGrado.length === 0) return null;
 
+                    // Colores por severidad para la UI
+                    const badgeColor = grado === 'MENOR' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : grado === 'MAYOR' ? 'bg-orange-100 text-orange-800 border-orange-200' : 'bg-red-100 text-red-800 border-red-200';
+
                     return (
-                        <div key={grado} className="border rounded-xl overflow-hidden">
-                            <div className="bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 uppercase">{grado}S ({deGrado.length})</div>
-                            <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div key={grado} className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                            <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-3">
+                                <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md border ${badgeColor}`}>
+                                    Severidad: {grado}
+                                </span>
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{deGrado.length} Factores Evaluables</span>
+                            </div>
+                            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                 {deGrado.map(dano => (
-                                    <div key={dano.key_dano} className="p-2 border rounded-lg flex justify-between items-center">
-                                        <label className="text-xs font-semibold text-slate-700">{dano.label}</label>
-                                        <input 
-                                            type="number" 
-                                            step="0.01" 
-                                            placeholder="0"
-                                            value={pesosDanos[dano.key_dano] ?? ''} 
-                                            onChange={(e) => handleDanoChange(dano.key_dano, e.target.value)} 
-                                            className="w-20 border text-right p-1 text-sm rounded"
-                                        />
+                                    <div key={dano.key_dano} className="bg-white p-3 border border-slate-200 rounded-xl flex flex-col justify-between hover:border-blue-300 transition-colors group">
+                                        <label className="text-[10px] font-black text-slate-700 uppercase tracking-widest mb-2 leading-tight group-hover:text-blue-700 transition-colors">{dano.label}</label>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="number" 
+                                                step="0.01" 
+                                                placeholder="0"
+                                                value={pesosDanos[dano.key_dano] ?? ''} 
+                                                onChange={(e) => handleDanoChange(dano.key_dano, e.target.value)} 
+                                                className="w-full bg-slate-50 border border-slate-200 text-right px-3 py-1.5 text-sm font-bold text-slate-800 rounded-lg outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 transition-all"
+                                            />
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -266,9 +329,15 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 })}
             </div>
 
-            <button type="submit" disabled={submitting} className="w-full bg-blue-600 text-white font-bold p-3 rounded-xl">
-                {submitting ? 'Guardando...' : 'Guardar Inspección'}
-            </button>
+            <div className="pt-4 border-t border-slate-200">
+                <button 
+                    type="submit" 
+                    disabled={submitting} 
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-widest p-4 rounded-xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 flex justify-center items-center gap-2"
+                >
+                    {submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Guardar y Emitir Certificado de Inspección'}
+                </button>
+            </div>
         </form>
     );
 };
