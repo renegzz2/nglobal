@@ -45,6 +45,9 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
     const [tamanoMuestra, setTamanoMuestra] = useState<number>(100);
     const [estatus, setEstatus] = useState('LIBERADO');
     const [observaciones, setObservaciones] = useState('');
+    
+    // NUEVO: Estado para las fotografías
+    const [fotos, setFotos] = useState<FileList | null>(null);
 
     const [pesosDanos, setPesosDanos] = useState<Record<string, number>>({});
 
@@ -53,7 +56,6 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         const fetchCatalogos = async () => {
             try {
                 const [resProd, resDanos, resProductores] = await Promise.all([
-                    // Se adapta para leer de usa_productos renombrando la columna al vuelo
                     supabase.from('usa_productos').select('id, nombre_del_producto, categoria').eq('activo', true).order('nombre_del_producto'),
                     supabase.from('usa_catalogo_danos').select('*').eq('condicion', true),
                     supabase.from('usa_productores').select('*').eq('condicion', true).order('nombre_productor')
@@ -103,7 +105,6 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         fetchHuertas();
     }, [productorId]);
 
-    // Identificar el objeto del producto actual y sus daños filtrados
     const productoActual = useMemo(() => {
         return productos.find(p => p.id === productoSeleccionadoId);
     }, [productos, productoSeleccionadoId]);
@@ -113,7 +114,6 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         return catalogoDanos.filter(d => d.categoria === productoActual.categoria);
     }, [catalogoDanos, productoActual]);
 
-    // Al cambiar de producto, se reinicia la captura de daños
     const handleProductoChange = (id: string) => {
         setProductoSeleccionadoId(id);
         setPesosDanos({});
@@ -123,8 +123,18 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         const numVal = Math.max(0, parseFloat(valor) || 0);
         setPesosDanos(prev => ({ ...prev, [key]: numVal }));
     };
+    
+    // Validación de cantidad de fotos (como en tu JS original)
+    const handleFotosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 15) {
+            alert("Solo puedes adjuntar un máximo de 15 fotografías.");
+            e.target.value = '';
+            setFotos(null);
+        } else {
+            setFotos(e.target.files);
+        }
+    };
 
-    // Cálculos dinámicos de daños y score
     const { detallesDanosJSON, totalPorcentajeDano, calidadScore } = useMemo(() => {
         const detalles: Record<string, { peso: number; porcentaje: number }> = {};
         let sumaPorcentajes = 0;
@@ -149,7 +159,6 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
         };
     }, [pesosDanos, tamanoMuestra, danosFiltrados]);
 
-    // Semáforo de Calidad basado en el Score
     let calidadColor = "text-slate-800";
     let calidadLabel = "EVALUANDO...";
 
@@ -185,14 +194,56 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 observaciones
             };
 
-            const { error } = await supabase.from('usa_inspecciones').insert([payload]);
-            if (error) throw error;
+            // 1. Guardar la inspección y recuperar el ID generado
+            const { data: insData, error: insError } = await supabase
+                .from('usa_inspecciones')
+                .insert([payload])
+                .select('id')
+                .single();
+                
+            if (insError) throw insError;
+            
+            const inspeccionId = insData.id;
 
-            alert('Inspección guardada correctamente');
+            // 2. Subir fotografías si existen
+            if (fotos && fotos.length > 0) {
+                for (let i = 0; i < fotos.length; i++) {
+                    const file = fotos[i];
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `origen_${inspeccionId}_${Date.now()}_${i}.${fileExt}`;
+                    
+                    // Subir a Storage
+                    const { error: uploadError } = await supabase.storage
+                        .from('usa_inspecciones_fotos')
+                        .upload(fileName, file);
+                        
+                    if (uploadError) {
+                        console.error("Error subiendo foto:", uploadError);
+                        continue; // Si falla una foto, que siga con las demás
+                    }
+                    
+                    // Obtener URL pública (opcional, dependiendo de si tu bucket es público)
+                    const { data: { publicUrl } } = supabase.storage
+                        .from('usa_inspecciones_fotos')
+                        .getPublicUrl(fileName);
+
+                    // Guardar registro en la tabla anexa de fotos
+                    await supabase.from('usa_fotos_inspeccion').insert([{
+                        inspeccion_id: inspeccionId,
+                        foto_url: publicUrl // o guardar solo el fileName si el bucket es privado
+                    }]);
+                }
+            }
+
+            alert('Inspección y fotografías guardadas correctamente');
             if (onSuccess) onSuccess();
 
             setPesosDanos({});
             setObservaciones('');
+            setFotos(null);
+            const fileInput = document.getElementById('fotos-input') as HTMLInputElement;
+            if (fileInput) fileInput.value = '';
+            
         } catch (err: any) {
             alert('Error al guardar: ' + err.message);
         } finally {
@@ -215,7 +266,6 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 </div>
             </div>
 
-            {/* Selectores Relacionales */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                     <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1">Producto *</label>
@@ -272,7 +322,6 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 </div>
             </div>
 
-            {/* Muestra y Resultados Rápidos */}
             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 flex justify-between items-center">
                 <div>
                     <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-1.5">Tamaño de Muestra Evaluada (Libras/Piezas/Kg)</label>
@@ -290,13 +339,11 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 </div>
             </div>
 
-            {/* Matriz de Captura de Daños Dinámicos */}
             <div className="space-y-5">
                 {(['MENOR', 'MAYOR', 'CRITICO'] as const).map(grado => {
                     const deGrado = danosFiltrados.filter(d => d.grado === grado);
                     if (deGrado.length === 0) return null;
 
-                    // Colores por severidad para la UI
                     const badgeColor = grado === 'MENOR' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : grado === 'MAYOR' ? 'bg-orange-100 text-orange-800 border-orange-200' : 'bg-red-100 text-red-800 border-red-200';
 
                     return (
@@ -329,13 +376,34 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 })}
             </div>
 
+            {/* SECCIÓN DE FOTOGRAFÍAS */}
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                <label className="block text-[10px] font-black text-slate-700 uppercase tracking-widest mb-2">Evidencia Fotográfica (Máx. 15 fotos)</label>
+                <input 
+                    id="fotos-input"
+                    type="file" 
+                    multiple 
+                    accept="image/*"
+                    onChange={handleFotosChange}
+                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:uppercase file:tracking-widest file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-all cursor-pointer"
+                />
+                {fotos && fotos.length > 0 && (
+                    <p className="text-xs font-bold text-blue-600 mt-3">{fotos.length} archivo(s) seleccionado(s) para subir.</p>
+                )}
+            </div>
+
             <div className="pt-4 border-t border-slate-200">
                 <button 
                     type="submit" 
                     disabled={submitting} 
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-widest p-4 rounded-xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50 flex justify-center items-center gap-2"
                 >
-                    {submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Guardar y Emitir Certificado de Inspección'}
+                    {submitting ? (
+                        <>
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> 
+                            <span>Subiendo datos y fotos...</span>
+                        </>
+                    ) : 'Guardar y Emitir Certificado de Inspección'}
                 </button>
             </div>
         </form>
