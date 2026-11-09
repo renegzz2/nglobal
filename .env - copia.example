@@ -1,5 +1,5 @@
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
+VITE_SUPABASE_URL=https://sucvgevhsmxrpkpvrblm.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_IrSrV-5hxtY2vg37p0vGfQ_lpgjzewGnpm ins
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 GEMINI_API_KEY=

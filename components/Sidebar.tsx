@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, User, UserRole } from '../types';
-import { DownloadIcon, ChartBarIcon, MapIcon, SettingsIcon, TruckIcon, LayoutGridIcon, DatabaseIcon, TableIcon, BoxIcon, EyeIcon, DocumentIcon } from './icons';
+import { DownloadIcon, ChartBarIcon, MapIcon, SettingsIcon, TruckIcon, LayoutGridIcon, DatabaseIcon, TableIcon, BoxIcon, EyeIcon } from './icons';
 import { subscribeUserToPush } from '../pushService';
-import { ClipboardCheck } from 'lucide-react';
+import { ClipboardCheck, FileText as DocumentIcon } from "lucide-react";
 
 interface SidebarProps {
   currentView: View;
@@ -138,20 +138,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           </button>
         )}
 
-        {canSee(View.QUALITY_INSPECTION) && (
-          <button
-            onClick={() => onNavigate(View.QUALITY_INSPECTION)}
-            className={`flex items-center gap-3 w-full p-3 rounded-xl font-bold transition-all ${
-              currentView === View.QUALITY_INSPECTION 
-                ? 'bg-blue-600 text-white shadow-md' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <ClipboardCheck className="w-5 h-5" />
-            <span>Inspección Calidad</span>
-          </button>        
-        )}
-
         {[UserRole.ADMINISTRADOR, UserRole.GERENCIA].includes(user.role) && (
           <div className="pt-4 pb-2 px-4">
             <span className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em]">Gestión Operativa</span>
@@ -172,11 +158,24 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
         )}
 
         {canSee(View.USA_SHIPMENTS) && (
-          <button onClick={() => onNavigate(View.USA_SHIPMENTS)} className={linkClass(View.USA_SHIPMENTS)}>
-            <div className={`p-1.5 rounded-lg ${currentView === View.USA_SHIPMENTS ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
-              <TruckIcon className="w-4 h-4" />
-            </div>
-            <span className="text-sm font-semibold tracking-tight">Operaciones USA</span>
+          <button
+              onClick={() => onNavigate(View.USA_EMBARQUES)}
+              className={linkClass(View.USA_EMBARQUES)}
+          >
+              <div className={`p-1.5 rounded-lg ${currentView === View.USA_EMBARQUES ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
+                  <TruckIcon className="w-4 h-4" />
+              </div>
+              <span className="text-sm font-semibold">Embarques</span>
+          </button>
+
+          <button
+              onClick={() => onNavigate(View.USA_SHIPMENTS)}
+              className={linkClass(View.USA_SHIPMENTS)}
+          >
+              <div className={`p-1.5 rounded-lg ${currentView === View.USA_SHIPMENTS ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
+                  <TruckIcon className="w-4 h-4" />
+              </div>
+              <span className="text-sm font-semibold">Operaciones USA</span>
           </button>
         )}
 

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import UsaShipmentReportPage from '../../components/UsaShipmentReportPage';
+import UsaShipmentReportPage from '../../components/UsaEmbarquesPage';
 
 /**
  * Orquestador para Subgerencia.

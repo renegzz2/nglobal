@@ -18,6 +18,7 @@ import { Geolocation } from '@capacitor/geolocation';
 import { Camera } from '@capacitor/camera';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { QualityForm } from './components/QualityForm';
+import UsaEmbarquesPage from './components/UsaEmbarquesPage';
 
 // CODE SPLITTING: Lazy load pages to optimize initial bundle size.
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -254,16 +255,45 @@ const App: React.FC = () => {
 
       if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
       if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-        return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES].includes(view);
+        return [
+          View.DASHBOARD, 
+          View.STRATEGIC_PLANNING, 
+          View.EXEC_REPORT, 
+          View.TIVE_MAP, 
+          View.USA_SHIPMENTS, 
+          (View as any).USA_EMBARQUES, 
+          View.SETTINGS, 
+          View.FREIGHT_PAYMENTS, 
+          View.COMPLEMENTARY_SERVICES, 
+          View.CUSTOMS_SERVICES
+        ].filter(Boolean).includes(view);
       }
       if (user.role === UserRole.LIDER_PROYECTO) {
         return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
       }
       if (user.role === UserRole.COORDINADOR) {
-        return [View.USA_SHIPMENTS, View.LIDER_PROGRAMACION_USA, View.DATABASE, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
+        return [
+          View.USA_SHIPMENTS, 
+          (View as any).USA_EMBARQUES, 
+          View.LIDER_PROGRAMACION_USA, 
+          View.DATABASE, 
+          View.TIVE_MAP, 
+          View.INVENTORY, 
+          View.SETTINGS
+        ].filter(Boolean).includes(view);
       }
       if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-        return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.COMPLEMENTARY_SERVICES, View.CUSTOMS_SERVICES, View.INVENTORY].includes(view);
+        return [
+          View.USA_SHIPMENTS, 
+          (View as any).USA_EMBARQUES, 
+          View.DATABASE, 
+          View.TIVE_MAP, 
+          View.SETTINGS, 
+          View.FREIGHT_PAYMENTS, 
+          View.COMPLEMENTARY_SERVICES, 
+          View.CUSTOMS_SERVICES, 
+          View.INVENTORY
+        ].filter(Boolean).includes(view);
       }
       return false;
     };
@@ -289,7 +319,18 @@ const App: React.FC = () => {
       switch (currentView) {
         case View.DASHBOARD: component = <Dashboard onViewChange={setCurrentView} />; break;
         case View.DATABASE: component = <BaseDeDatosPage user={user} />; break;
-        case View.USA_SHIPMENTS: component = <UsaShipmentReportPage initialView="active" user={user} />; break;
+        
+        // MÓDULO ACTUAL QUE USA LOGÍSTICA TRÁFICO
+        case View.USA_SHIPMENTS: 
+          component = <UsaShipmentReportPage initialView="active" user={user} />; 
+          break;
+        
+        // NUEVA PANTALLA: EMBARQUES USA (CAPTURA MANUAL CON WIZARD)
+        case (View as any).USA_EMBARQUES:
+        case 'usa_embarques' as any:
+          component = <UsaEmbarquesPage />;
+          break;
+
         case View.LIDER_PROGRAMACION_USA: component = <LiderProgramacionUsaPage user={user} />; break;
         case View.FRUIT_QUALITY: component = <FruitQualityChecker />; break;
         case View.STRATEGIC_PLANNING: component = <StrategicPlanningPage user={user} />; break;
@@ -300,7 +341,7 @@ const App: React.FC = () => {
         // RUTAS DE PAGOS:
         case View.FREIGHT_PAYMENTS: component = <FreightPaymentPage />; break;
         case View.COMPLEMENTARY_SERVICES: component = <ComplementaryServicesPage />; break;
-        case View.CUSTOMS_SERVICES: component = <CustomsServicesPage />; break; // Actualiza este archivo cuando crees el real
+        case View.CUSTOMS_SERVICES: component = <CustomsServicesPage />; break;
 
         case View.INVENTORY: component = <InventoryPage />; break;
         case View.POLICIES: component = <PoliciesPage onBack={() => {
@@ -338,6 +379,9 @@ const App: React.FC = () => {
       case View.DASHBOARD: return 'Panel de Control';
       case View.DATABASE: return 'Base de Datos';
       case View.USA_SHIPMENTS: return 'Reporte USA';
+      case (View as any).USA_EMBARQUES:
+      case 'usa_embarques' as any:
+        return 'Nuevo Embarque USA';
       case View.LIDER_PROGRAMACION_USA: return 'Programación Líder';
       case View.FRUIT_QUALITY: return 'Calidad IA';
       case View.STRATEGIC_PLANNING: return 'Alcance y Metas';

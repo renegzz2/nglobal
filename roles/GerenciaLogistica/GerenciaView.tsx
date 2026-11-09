@@ -1,7 +1,7 @@
 
 import React from 'react';
 import Dashboard from '../../components/Dashboard';
-import UsaShipmentReportPage from '../../components/UsaShipmentReportPage';
+import UsaShipmentReportPage from '../../components/UsaEmbarquesPage';
 import { View } from '../../types';
 
 interface GerenciaViewProps {
