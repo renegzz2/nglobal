@@ -449,7 +449,7 @@ export const UsaEmbarquesPage: React.FC = () => {
                                 <select
                                     value={lineaTransporte}
                                     onChange={e => setLineaTransporte(e.target.value)}
-                                    className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
+                                    className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200"
                                     required
                                 >
                                     <option value="">Selecciona transportista...</option>
