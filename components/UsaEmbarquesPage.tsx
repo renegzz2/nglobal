@@ -1,18 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
-
-interface PartidaCarga {
-    id: string;
-    numero_pallet: number | string;
-    producto_id: string;
-    remision: string;
-    mid: string;
-    lote_pt: string;
-    cantidad_cajas: number;
-    calidad?: string;
-    lbs?: string;
-}
+import { crearPartidasDesdeExcel } from '../lib/usaEmbarquesImport';
+import type { PartidaCarga, ProductoCatalog } from '../lib/usaEmbarquesImport';
 
 interface Cliente {
     id: string;
@@ -28,14 +18,6 @@ interface Transportista {
     nombre?: string;
     razon_social?: string;
     linea?: string;
-}
-
-interface ProductoCatalog {
-    id: string;
-    nombre_del_producto: string;
-    alias_usa?: string | null;
-    config_usa?: string | null;
-    display_label?: string;
 }
 
 export const UsaEmbarquesPage: React.FC = () => {
@@ -182,46 +164,14 @@ export const UsaEmbarquesPage: React.FC = () => {
 
                 setDatosExcel(cleanData);
 
-                // Mapear partidas reconociendo la combinación: nombre + calidad + lbs
-                const partidasGeneradas: PartidaCarga[] = cleanData.map((row, index) => {
-                    const prodExcel = String(row['PRODUCTO'] || '').trim().toLowerCase();
-                    const calidadExcel = String(row['CALIDAD'] || '').trim().toLowerCase();
-                    const lbsExcel = String(row['LBS'] || '').trim().toLowerCase();
-
-                    // Buscar mejor coincidencia en catálogo
-                    const prodEncontrado = productosCatalogo.find(p => {
-                        const nombreMatch = prodExcel.includes(p.nombre_del_producto.toLowerCase()) || 
-                                           p.nombre_del_producto.toLowerCase().includes(prodExcel);
-                        
-                        const calMatch = !calidadExcel || !p.alias_usa || 
-                                         p.alias_usa.toLowerCase() === calidadExcel;
-                        
-                        const lbsMatch = !lbsExcel || !p.config_usa || 
-                                         p.config_usa.toLowerCase().includes(lbsExcel);
-
-                        return nombreMatch && (calMatch || lbsMatch);
-                    }) || productosCatalogo.find(p => 
-                        prodExcel.includes(p.nombre_del_producto.toLowerCase()) || 
-                        p.nombre_del_producto.toLowerCase().includes(prodExcel)
-                    );
-
-                    return {
-                        id: `${Date.now()}-${index}`,
-                        numero_pallet: row['PALLET'] !== undefined ? String(row['PALLET']).trim() : index + 1,
-                        producto_id: prodEncontrado ? prodEncontrado.id : '',
-                        remision: String(row['REMISION'] || '').trim(),
-                        mid: String(row['MID'] || '').trim(),
-                        lote_pt: String(row['LOTE'] || '').trim(),
-                        cantidad_cajas: parseFloat(row['CAJAS']) || 0,
-                        calidad: String(row['CALIDAD'] || ''),
-                        lbs: String(row['LBS'] || '')
-                    };
-                });
+                // Mantener las filas y pallets; asignar solo coincidencias únicas.
+                const partidasGeneradas = crearPartidasDesdeExcel(cleanData, productosCatalogo);
 
                 setCargaPartidas(partidasGeneradas);
 
                 const palletsUnicos = new Set(partidasGeneradas.map(p => p.numero_pallet)).size;
-                alert(`Layout procesado: Se cargaron ${partidasGeneradas.length} partidas distribuidas en ${palletsUnicos} pallets.`);
+                const pendientes = partidasGeneradas.filter(p => !p.producto_id).length;
+                alert(`Layout procesado: Se cargaron ${partidasGeneradas.length} partidas distribuidas en ${palletsUnicos} pallets.${pendientes ? ` Hay ${pendientes} partida(s) pendientes de selección manual de producto.` : ''}`);
             } catch (err: any) {
                 console.error(err);
                 alert("Error al leer el archivo Excel: " + err.message);
@@ -261,6 +211,19 @@ export const UsaEmbarquesPage: React.FC = () => {
 
     const countFotosCargadas = () => Object.values(fotos).filter(f => f !== null).length;
 
+    const validarProductosAsignados = () => {
+        const pendientes = cargaPartidas.filter(partida =>
+            !productosCatalogo.some(producto => producto.id === partida.producto_id)
+        );
+        if (pendientes.length > 0) {
+            alert(`Selecciona un producto válido para las ${pendientes.length} partida(s) pendientes antes de guardar.`);
+            setMostrarModalAuditoria(false);
+            setActiveTab(2);
+            return false;
+        }
+        return true;
+    };
+
     // Validación y auditoría cruzada contra el Excel
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -274,6 +237,8 @@ export const UsaEmbarquesPage: React.FC = () => {
             alert("Debes capturar al menos un pallet.");
             return;
         }
+
+        if (!validarProductosAsignados()) return;
 
         const nuevasDiscrepancias: string[] = [];
 
@@ -307,6 +272,7 @@ export const UsaEmbarquesPage: React.FC = () => {
     };
 
     const confirmarYGuardar = async () => {
+        if (!validarProductosAsignados()) return;
         setGuardando(true);
         try {
             const clienteSel = clientesList.find(c => c.id === clienteId);
@@ -646,6 +612,11 @@ export const UsaEmbarquesPage: React.FC = () => {
                                                     <option key={p.id} value={p.id}>{p.display_label}</option>
                                                 ))}
                                             </select>
+                                            {!partida.producto_id && partida.incidencia_importacion && (
+                                                <p role="alert" className="mt-1 text-[11px] text-amber-300">
+                                                    {partida.incidencia_importacion}
+                                                </p>
+                                            )}
                                         </div>
                                         <div>
                                             <span className="block text-[9px] font-bold text-white/50 uppercase tracking-widest mb-0.5">Cajas</span>
