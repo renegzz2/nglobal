@@ -34,7 +34,8 @@ create table public.usa_embarques (
   folio_embarque text unique not null, fecha_embarque timestamptz not null,
   linea_transporte text, nombre_operador text, placas_caja text, placas_tractor text, temperatura_viaje numeric,
   destino text, estatus_embarque text, alerta_inspeccion_pt boolean, diferencias_auditoria jsonb,
-  foto_remision text, foto_termografo text, foto_diesel text, foto_refacciones text, foto_temperatura text
+  foto_remision text, foto_termografo text, foto_diesel text, foto_refacciones text, foto_temperatura text,
+  dispatch_activation_enabled boolean not null default true
 );
 create table public.usa_embarques_detalle (
   embarque_id uuid references public.usa_embarques(id), numero_pallet text, producto_id uuid references public.usa_productos(id),
@@ -49,6 +50,20 @@ create table public.usa_shipment_reports (
   unit_type text, tive_tracker_id text, temperature numeric check (temperature <> 99), ideal_temp numeric, total_real_boxes integer,
   incidents jsonb, comments text
 );
+
+-- The deployed schema can create a dispatch while inserting shipment details.
+create function public.fixture_auto_dispatch() returns trigger language plpgsql as $$
+begin
+  insert into public.usa_shipment_reports (trip_id)
+  select 'VIAJE-' || e.id::text
+  from public.usa_embarques e
+  where e.id = new.embarque_id and e.dispatch_activation_enabled
+  on conflict (trip_id) do nothing;
+  return null;
+end
+$$;
+create trigger fixture_auto_dispatch after insert on public.usa_embarques_detalle
+for each row execute function public.fixture_auto_dispatch();
 
 insert into public.usa_clientes values ('20000000-0000-0000-0000-000000000001', 'Cliente de prueba');
 insert into public.usa_proyectos values ('30000000-0000-0000-0000-000000000001', 'Proyecto de prueba');

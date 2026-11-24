@@ -18,6 +18,9 @@ create function public.fixture_embarque_fotos(solicitud uuid) returns jsonb lang
   from unnest(array['remision','termografo','diesel','refacciones','temperatura']) tipo
 $$;
 
+insert into public.usa_embarques (folio_embarque, fecha_embarque) values ('EMB-000001', now());
+insert into public.usa_shipment_reports (trip_id) values ('EMB-000002');
+
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"10000000-0000-0000-0000-000000000001","user_metadata":{"role":"COORDINADOR"}}',true);
 do $$
@@ -67,6 +70,10 @@ begin
 
   resultado := public.ng_finalizar_embarque_usa(solicitud, public.fixture_embarque_datos(),
     public.fixture_embarque_partidas(), public.fixture_embarque_fotos(solicitud));
+  if resultado->>'folio' is null or resultado->>'folio' !~ '^EMB-[0-9]{6}$'
+    or resultado->>'folio' in ('EMB-000001', 'EMB-000002') then
+    raise exception 'The dispatch must have an unused six-digit EMB folio';
+  end if;
   if resultado is distinct from public.ng_finalizar_embarque_usa(solicitud, public.fixture_embarque_datos(),
     public.fixture_embarque_partidas(), public.fixture_embarque_fotos(solicitud)) then
     raise exception 'The retry returned a different dispatch';
@@ -77,8 +84,8 @@ $$;
 reset role;
 do $$
 begin
-  if (select count(*) from public.usa_embarques) <> 1 or (select count(*) from public.usa_embarques_detalle) <> 2
-    or (select count(*) from public.usa_shipment_reports) <> 1 then
+  if (select count(*) from public.usa_embarques) <> 2 or (select count(*) from public.usa_embarques_detalle) <> 2
+    or (select count(*) from public.usa_shipment_reports) <> 2 then
     raise exception 'A failed write or retry left duplicated or partial rows';
   end if;
   if not exists (
@@ -89,7 +96,7 @@ begin
 end
 $$;
 
-select set_config('test.despacho_id', (select id::text from public.usa_shipment_reports), true);
+select set_config('test.despacho_id', (select id::text from public.usa_shipment_reports where trip_id <> 'EMB-000002'), true);
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"10000000-0000-0000-0000-000000000002","app_metadata":{"role":"GERENCIA"}}',true);
 do $$
