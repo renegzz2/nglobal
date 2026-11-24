@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
 import { crearPartidasDesdeExcel } from '../lib/usaEmbarquesImport';
 import type { PartidaCarga, ProductoCatalog } from '../lib/usaEmbarquesImport';
+import { extensionFotoEmbarque, finalizarEmbarqueUsa } from '../lib/usaEmbarquesFinalize';
+import type { FotosEmbarque, IntentoEmbarque } from '../lib/usaEmbarquesFinalize';
 
 interface Cliente {
     id: string;
@@ -20,16 +22,22 @@ interface Transportista {
     linea?: string;
 }
 
-export const UsaEmbarquesPage: React.FC = () => {
+export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({ onDispatchCreated }) => {
     const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
 
     // --- CATÁLOGOS DESDE SUPABASE ---
     const [clientesList, setClientesList] = useState<Cliente[]>([]);
     const [transportistasList, setTransportistasList] = useState<Transportista[]>([]);
     const [productosCatalogo, setProductosCatalogo] = useState<ProductoCatalog[]>([]);
+    const [proyectos, setProyectos] = useState<{ id: string; nombre: string }[]>([]);
+    const [sucursales, setSucursales] = useState<{ id: string; proyecto_id: string; nombre_sucursal: string }[]>([]);
+    const [errorCatalogos, setErrorCatalogos] = useState('');
 
     // --- ESTADOS GENERALES (Pestaña 1) ---
     const [clienteId, setClienteId] = useState('');
+    const [proyectoId, setProyectoId] = useState('');
+    const [sucursalId, setSucursalId] = useState('');
+    const [lineaTransporteId, setLineaTransporteId] = useState('');
     const [lineaTransporte, setLineaTransporte] = useState('');
     const [fechaSalida, setFechaSalida] = useState('');
     const [nombreOperador, setNombreOperador] = useState('');
@@ -46,17 +54,19 @@ export const UsaEmbarquesPage: React.FC = () => {
     const [datosExcel, setDatosExcel] = useState<any[]>([]);
 
     // --- ESTADOS DE FOTOS (Pestaña 3) ---
-    const [fotos, setFotos] = useState({
-        remision: null as File | null,
-        termografo: null as File | null,
-        diesel: null as File | null,
-        refacciones: null as File | null,
-        temperatura: null as File | null,
+    const [fotos, setFotos] = useState<FotosEmbarque>({
+        remision: null,
+        termografo: null,
+        diesel: null,
+        refacciones: null,
+        temperatura: null,
     });
 
     const [discrepancias, setDiscrepancias] = useState<string[]>([]);
     const [mostrarModalAuditoria, setMostrarModalAuditoria] = useState(false);
     const [guardando, setGuardando] = useState(false);
+    const intento = useRef<IntentoEmbarque>();
+    const envioEnCurso = useRef(false);
 
     // 1. Carga de Catálogos al montar
     useEffect(() => {
@@ -77,8 +87,7 @@ export const UsaEmbarquesPage: React.FC = () => {
                 .select('*');
             if (dataTrans && dataTrans.length > 0) {
                 setTransportistasList(dataTrans);
-                const firstLabel = dataTrans[0].nombre_linea || dataTrans[0].nombre || dataTrans[0].razon_social || '';
-                setLineaTransporte(firstLabel);
+                setLineaTransporteId(dataTrans[0].id);
             }
 
             // Productos consolidando: nombre_del_producto, alias_usa (calidad) y config_usa (lbs)
@@ -99,6 +108,17 @@ export const UsaEmbarquesPage: React.FC = () => {
                 });
                 setProductosCatalogo(formateados);
             }
+
+            const [origenes, sedes] = await Promise.all([
+                supabase.from('usa_proyectos').select('id,nombre').order('nombre'),
+                supabase.from('usa_sucursales').select('id,proyecto_id,nombre_sucursal').order('nombre_sucursal'),
+            ]);
+            if (origenes.error || sedes.error) {
+                setErrorCatalogos('No se pudieron cargar los proyectos o sucursales. Recarga la pantalla antes de registrar el embarque.');
+                return;
+            }
+            setProyectos(origenes.data || []);
+            setSucursales(sedes.data || []);
         };
 
         cargarCatalogos();
@@ -107,8 +127,9 @@ export const UsaEmbarquesPage: React.FC = () => {
     // Validación de campos completos en Pestaña 1
     const validarPaso1 = () => {
         if (!clienteId) { alert("Por favor selecciona un Cliente."); return false; }
-        if (!fechaSalida) { alert("Por favor ingresa la Fecha y hora de salida."); return false; }
-        if (!lineaTransporte.trim()) { alert("Por favor selecciona o escribe la Línea transportista."); return false; }
+        if (!proyectoId) { alert('Selecciona el proyecto de origen.'); return false; }
+        if (!fechaSalida || Number.isNaN(new Date(fechaSalida).getTime())) { alert("Por favor ingresa la Fecha y hora de salida."); return false; }
+        if (!lineaTransporteId && !lineaTransporte.trim()) { alert("Por favor selecciona o escribe la Línea transportista."); return false; }
         if (!nombreOperador.trim()) { alert("Por favor indica el Nombre del operador."); return false; }
         if (!placasTractor.trim()) { alert("Por favor escribe las Placas del tractor."); return false; }
         if (!placasCaja.trim()) { alert("Por favor escribe las Placas de la caja."); return false; }
@@ -206,6 +227,13 @@ export const UsaEmbarquesPage: React.FC = () => {
     };
 
     const handleFotoChange = (tipo: keyof typeof fotos, file: File | null) => {
+        try {
+            if (file) extensionFotoEmbarque(file);
+        } catch (error) {
+            if (error instanceof Error) alert(error.message);
+            setFotos(prev => ({ ...prev, [tipo]: null }));
+            return;
+        }
         setFotos(prev => ({ ...prev, [tipo]: file }));
     };
 
@@ -239,6 +267,12 @@ export const UsaEmbarquesPage: React.FC = () => {
         }
 
         if (!validarProductosAsignados()) return;
+        if (cargaPartidas.some(partida => !partida.remision.trim() || !partida.mid.trim() ||
+            !String(partida.numero_pallet).trim() || !Number.isInteger(partida.cantidad_cajas) || partida.cantidad_cajas <= 0)) {
+            alert('Revisa pallet, remisión, MID y cantidad de cajas de cada partida.');
+            setActiveTab(2);
+            return;
+        }
 
         const nuevasDiscrepancias: string[] = [];
 
@@ -272,60 +306,39 @@ export const UsaEmbarquesPage: React.FC = () => {
     };
 
     const confirmarYGuardar = async () => {
-        if (!validarProductosAsignados()) return;
+        if (envioEnCurso.current || !validarProductosAsignados() || !validarPaso1()) return;
+        envioEnCurso.current = true;
         setGuardando(true);
         try {
-            const clienteSel = clientesList.find(c => c.id === clienteId);
-            const nombreCliente = clienteSel?.nombre_cliente || clienteSel?.nombre || clienteSel?.razon_social || clienteId;
+            intento.current ??= { id: crypto.randomUUID(), cargas: {} };
+            const { folio } = await finalizarEmbarqueUsa(intento.current, {
+                cliente_id: clienteId,
+                proyecto_id: proyectoId,
+                sucursal_id: sucursalId || null,
+                transportista_id: lineaTransporteId || null,
+                transportista_manual: lineaTransporte.trim(),
+                fecha_salida: new Date(fechaSalida).toISOString(),
+                operador: nombreOperador.trim(),
+                placas_caja: placasCaja.trim(),
+                placas_tractor: placasTractor.trim(),
+                economico: economico.trim(),
+                pies: pies.trim(),
+                termografo: termografo.trim(),
+                temperatura: Number(temperaturaViaje),
+                termo_continuo: termoContinuo,
+                discrepancias,
+            }, cargaPartidas, fotos);
 
-            const payloadEmbarque = {
-                folio_embarque: `EMB-${Date.now().toString().slice(-6)}`,
-                linea_transporte: lineaTransporte,
-                nombre_operador: nombreOperador,
-                placas_caja: placasCaja,
-                placas_tractor: placasTractor,
-                temperatura_viaje: Number(temperaturaViaje) || 0,
-                destino: nombreCliente,
-                estatus_embarque: 'EN REVISIÓN RI',
-                alerta_inspeccion_pt: discrepancias.some(d => d.includes("Lote PT")),
-                diferencias_auditoria: discrepancias,
-                foto_remision: 'pendiente',
-                foto_termografo: 'pendiente',
-                foto_diesel: 'pendiente',
-                foto_refacciones: 'pendiente',
-                foto_temperatura: 'pendiente',
-            };
-
-            const { data: emb, error: errEmb } = await supabase
-                .from('usa_embarques')
-                .insert([payloadEmbarque])
-                .select('id')
-                .single();
-
-            if (errEmb) throw errEmb;
-
-            const payloadDetalles = cargaPartidas.map(p => ({
-                embarque_id: emb.id,
-                numero_pallet: p.numero_pallet,
-                producto_id: p.producto_id,
-                remision: p.remision,
-                mid: p.mid,
-                lote_pt: p.lote_pt,
-                cantidad_cajas: p.cantidad_cajas
-            }));
-
-            const { error: errDet } = await supabase
-                .from('usa_embarques_detalle')
-                .insert(payloadDetalles);
-
-            if (errDet) throw errDet;
-
-            alert("Embarque guardado exitosamente.");
+            alert('El despacho ' + folio + ' está disponible en Operaciones USA.');
             setMostrarModalAuditoria(false);
-            window.location.reload();
-        } catch (error: any) {
-            alert("Error al registrar: " + error.message);
+            if (onDispatchCreated) onDispatchCreated();
+            else window.location.reload();
+        } catch (error: unknown) {
+            const mensaje = error && typeof error === 'object' && 'message' in error
+                ? String(error.message) : 'Error al registrar el embarque.';
+            alert(mensaje + ' Puedes reintentar esta captura.');
         } finally {
+            envioEnCurso.current = false;
             setGuardando(false);
         }
     };
@@ -378,7 +391,7 @@ export const UsaEmbarquesPage: React.FC = () => {
                     <div className="space-y-4">
                         <div className="border-b border-white/10 pb-3">
                             <h2 className="text-lg font-black uppercase tracking-wide text-[#002D62]">Datos de Salida</h2>
-                            <p className="text-[11px] text-[#002D62]">Todos los campos son obligatorios para continuar.</p>
+                            <p className="text-[11px] text-[#002D62]">Completa los campos marcados con *.</p>
                         </div>
 
                         <div>
@@ -398,6 +411,29 @@ export const UsaEmbarquesPage: React.FC = () => {
                             </select>
                         </div>
 
+                        {errorCatalogos && <p role="alert" className="text-xs text-danger">{errorCatalogos}</p>}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider">
+                                Proyecto de origen *
+                                <select value={proyectoId} onChange={e => { setProyectoId(e.target.value); setSucursalId(''); }}
+                                    className="mt-1 w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white" required>
+                                    <option value="">Selecciona un proyecto...</option>
+                                    {proyectos.map(proyecto => <option key={proyecto.id} value={proyecto.id}>{proyecto.nombre}</option>)}
+                                </select>
+                            </label>
+                            <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider">
+                                Sucursal de origen
+                                <select value={sucursalId} onChange={e => setSucursalId(e.target.value)} disabled={!proyectoId}
+                                    className="mt-1 w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white disabled:opacity-60">
+                                    <option value="">Selecciona una sucursal...</option>
+                                    {sucursales.filter(sucursal => sucursal.proyecto_id === proyectoId).map(sucursal => (
+                                        <option key={sucursal.id} value={sucursal.id}>{sucursal.nombre_sucursal}</option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
+
                         <div>
                             <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider mb-1">Fecha y hora de salida *</label>
                             <input
@@ -413,8 +449,8 @@ export const UsaEmbarquesPage: React.FC = () => {
                             <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider mb-1">Línea transportista *</label>
                             {transportistasList.length > 0 ? (
                                 <select
-                                    value={lineaTransporte}
-                                    onChange={e => setLineaTransporte(e.target.value)}
+                                    value={lineaTransporteId}
+                                    onChange={e => setLineaTransporteId(e.target.value)}
                                     className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200"
                                     required
                                 >
@@ -422,7 +458,7 @@ export const UsaEmbarquesPage: React.FC = () => {
                                     {transportistasList.map(t => {
                                         const label = t.nombre_linea || t.nombre || t.razon_social || t.linea || t.id;
                                         return (
-                                            <option key={t.id} value={label}>{label}</option>
+                                            <option key={t.id} value={t.id}>{label}</option>
                                         );
                                     })}
                                 </select>
@@ -741,7 +777,7 @@ export const UsaEmbarquesPage: React.FC = () => {
                                     </span>
                                     <input
                                         type="file"
-                                        accept="image/*"
+                                        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                                         className="hidden"
                                         onChange={e => handleFotoChange(item.key as keyof typeof fotos, e.target.files?.[0] || null)}
                                     />
@@ -803,6 +839,7 @@ export const UsaEmbarquesPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setMostrarModalAuditoria(false)}
+                                disabled={guardando}
                                 className="flex-1 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all"
                             >
                                 Regresar

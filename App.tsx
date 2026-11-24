@@ -328,7 +328,7 @@ const App: React.FC = () => {
         // NUEVA PANTALLA: EMBARQUES USA (CAPTURA MANUAL CON WIZARD)
         case (View as any).USA_EMBARQUES:
         case 'usa_embarques' as any:
-          component = <UsaEmbarquesPage />;
+          component = <UsaEmbarquesPage onDispatchCreated={() => setCurrentView(View.USA_SHIPMENTS)} />;
           break;
 
         case View.LIDER_PROGRAMACION_USA: component = <LiderProgramacionUsaPage user={user} />; break;
