@@ -8,6 +8,7 @@ import { useTiveMonitoring } from './TiveMonitoringProvider';
 import { useNotification } from './NotificationProvider';
 import { supabase } from '../lib/supabase';
 import { formatCarrierName, toCamelCase } from '../utils/formatters';
+import { UsaShipmentEvidence } from './UsaShipmentEvidence';
 
 interface ShipmentDetailsModalProps {
     isOpen: boolean;
@@ -17,6 +18,7 @@ interface ShipmentDetailsModalProps {
     proyectos: ProyectoDB[];
     clientes: ClienteDB[];
     logisticStatuses: EstatusDB[];
+    lineas?: LineaTransporteDB[];
     onCompleteTrip: (id: string) => void;
     onRefresh?: () => void; 
 }
@@ -33,14 +35,15 @@ const formatFullSafeDate = (dateStr: string | undefined | null) => {
     return isNaN(date.getTime()) ? 'Fecha inválida' : date.toLocaleString('es-MX', { dateStyle: 'long', timeStyle: 'short' });
 };
 
-const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onClose, report, productSpecs, proyectos, clientes, logisticStatuses, onCompleteTrip, onRefresh }) => {
+const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onClose, report, productSpecs, proyectos, clientes, logisticStatuses, lineas: catalogoLineas, onCompleteTrip, onRefresh }) => {
     const [tiveHistory, setTiveHistory] = useState<TiveEvent[]>([]);
     const [dbAlerts, setDbAlerts] = useState<any[]>([]);
     const [dictionary, setDictionary] = useState<Record<string, TiveAlertTranslation>>({});
     const [loadingTive, setLoadingTive] = useState(false);
     const [activeTab, setActiveTab] = useState<'logistics' | 'temperature' | 'location' | 'alerts' | 'location' | 'trajectory'>('logistics');
     const [currentStatus, setCurrentStatus] = useState(report.logisticStatus);
-    const [lineas, setLineas] = useState<LineaTransporteDB[]>([]);
+    const [lineasConsultadas, setLineas] = useState<LineaTransporteDB[]>([]);
+    const lineas = catalogoLineas ?? lineasConsultadas;
     const [projectProductMap, setProjectProductMap] = useState<Record<string, string[]>>({});
 
     // ESTADOS PARA EL FILTRO TÉRMICO
@@ -582,6 +585,8 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                                         renderLoadTable(report.products || [])
                                     )}
                                 </div>
+
+                                <UsaShipmentEvidence key={report.id} despachoId={report.id} />
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="bg-white p-5 rounded-2xl border border-border shadow-sm">

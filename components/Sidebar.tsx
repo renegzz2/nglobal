@@ -158,25 +158,27 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
         )}
 
         {canSee(View.USA_SHIPMENTS) && (
-          <button
-              onClick={() => onNavigate(View.USA_EMBARQUES)}
-              className={linkClass(View.USA_EMBARQUES)}
-          >
-              <div className={`p-1.5 rounded-lg ${currentView === View.USA_EMBARQUES ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
-                  <TruckIcon className="w-4 h-4" />
-              </div>
-              <span className="text-sm font-semibold">Embarques</span>
-          </button>
+          <>
+            <button
+                onClick={() => onNavigate(View.USA_EMBARQUES)}
+                className={linkClass(View.USA_EMBARQUES)}
+            >
+                <div className={`p-1.5 rounded-lg ${currentView === View.USA_EMBARQUES ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
+                    <TruckIcon className="w-4 h-4" />
+                </div>
+                <span className="text-sm font-semibold">Embarques</span>
+            </button>
 
           <button
-              onClick={() => onNavigate(View.USA_SHIPMENTS)}
-              className={linkClass(View.USA_SHIPMENTS)}
-          >
-              <div className={`p-1.5 rounded-lg ${currentView === View.USA_SHIPMENTS ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
-                  <TruckIcon className="w-4 h-4" />
-              </div>
-              <span className="text-sm font-semibold">Operaciones USA</span>
-          </button>
+                onClick={() => onNavigate(View.USA_SHIPMENTS)}
+                className={linkClass(View.USA_SHIPMENTS)}
+            >
+                <div className={`p-1.5 rounded-lg ${currentView === View.USA_SHIPMENTS ? 'bg-white/20' : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'}`}>
+                    <TruckIcon className="w-4 h-4" />
+                </div>
+                <span className="text-sm font-semibold">Operaciones USA</span>
+            </button>
+          </>
         )}
 
         {canSeeInspections && (

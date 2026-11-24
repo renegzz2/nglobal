@@ -234,4 +234,46 @@ const CustomsServicesPage: React.FC = () => {
                                 {isConsolidated && (
                                     <div className="bg-gray-50 p-4 rounded-2xl border border-border animate-fade-in">
                                         <div className="flex justify-between items-center mb-3">
-                                            <h5 className="text-[10px] font-black text-text-muted uppercase tracking-widest"></h5>
+                                            <h5 className="text-[10px] font-black text-text-muted uppercase tracking-widest">Partidas Internas Autocompletadas</h5>
+                                            <div className="text-right">
+                                                <span className="block text-[8px] font-bold text-text-muted uppercase">Suma del Desglose</span>
+                                                <span className={`text-sm font-black ${Math.abs(totalDesglose - Number(formData.monto)) < 0.01 ? 'text-emerald-600' : 'text-danger'}`}>
+                                                    ${totalDesglose.toLocaleString('en-US', { minimumFractionDigits: 2 })} / ${Number(formData.monto || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            {desglose.map((item) => (
+                                                <div key={item.id} className="flex items-center gap-2">
+                                                    <input type="text" required className={`${inputClass} flex-1 text-[11px]`} placeholder="Cliente / Lote / Producto" value={item.descripcion} onChange={(e) => handleUpdateDesglose(item.id, 'descripcion', e.target.value)} />
+                                                    <div className="relative w-32">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-bold text-xs">$</span>
+                                                        <input type="number" step="0.01" required className={`${inputClass} pl-6 text-xs`} placeholder="0.00" value={item.monto} onChange={(e) => handleUpdateDesglose(item.id, 'monto', e.target.value)} />
+                                                    </div>
+                                                    <button type="button" onClick={() => handleRemoveDesgloseRow(item.id)} disabled={desglose.length === 1} className="p-2 text-text-muted hover:text-danger hover:bg-red-50 rounded-xl transition-all disabled:opacity-50">
+                                                        <XIcon className="w-5 h-5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button type="button" onClick={handleAddDesgloseRow} className="mt-3 flex items-center gap-1 text-[10px] font-black text-primary uppercase tracking-widest hover:text-primary-focus">
+                                            <PlusIcon className="w-3 h-3" /> Agregar Partida Extra
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="pt-4 flex justify-end gap-3 border-t border-border mt-4">
+                                <button type="button" onClick={() => { setIsModalOpen(false); resetForm(); }} className="px-6 py-3 rounded-xl font-bold text-xs text-text-secondary hover:bg-hover">Cancelar</button>
+                                <button type="submit" className="bg-primary text-white px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-primary-focus">Guardar Registro</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default CustomsServicesPage;
