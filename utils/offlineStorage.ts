@@ -2,7 +2,7 @@
 // Jefe, este archivo gestiona la cola de sincronización para cuando el internet falle en los patios.
 
 const DB_NAME = 'nglobal_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SYNC_STORE = 'sync_queue';
 const IMAGE_STORE = 'quality_images';
 
@@ -12,6 +12,10 @@ export const initOfflineDB = (): Promise<IDBDatabase> => {
     
     request.onupgradeneeded = (event: any) => {
       const db = event.target.result;
+      if (!db.objectStoreNames.contains('shipment_incidents')) {
+        const incidents = db.createObjectStore('shipment_incidents', { keyPath: 'row.id' });
+        incidents.createIndex('ownerId', 'ownerId');
+      }
       if (!db.objectStoreNames.contains(SYNC_STORE)) {
         db.createObjectStore(SYNC_STORE, { keyPath: 'id', autoIncrement: true });
       }

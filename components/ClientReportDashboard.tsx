@@ -56,9 +56,8 @@ function getCurrentWeek(): number {
   return getWeekNumber(new Date());
 }
 
-const ClientReportDashboard: React.FC = () => {
+const ClientReportDashboard: React.FC<{ userRole: string }> = ({ userRole }) => {
   const { addNotification } = useNotification();
-  const [userRole, setUserRole] = useState<string | null>(null);
   
   const [activeWeek, setActiveWeek] = useState<number>(getCurrentWeek());
   const [referenceYear, setReferenceYear] = useState<number>(new Date().getFullYear());
@@ -81,8 +80,6 @@ const ClientReportDashboard: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('ng_auth_profile');
-    if (savedUser) setUserRole(JSON.parse(savedUser).role);
     fetchData();
   }, [activeWeek, dateRange, useDateRange, referenceYear]);
 

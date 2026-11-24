@@ -10,9 +10,10 @@
 declare const Deno: any;
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { GoogleGenAI } from "https://esm.sh/@google/genai";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.119.2";
+import { GoogleGenAI } from "https://esm.sh/@google/genai@3.6.1";
 import { createJsonResponse, createOptionsResponse } from "../_shared/cors.ts";
+import { readBody } from "../_shared/webhook.ts";
 
 const ALLOWED_CONTEXT_ROLES = new Set([
   'COORDINADOR',
@@ -50,7 +51,7 @@ serve(async (req) => {
     });
 
     const { data: authData, error: authError } = await authClient.auth.getUser(jwt);
-    const rawRole = authData.user?.app_metadata?.role || authData.user?.user_metadata?.role;
+    const rawRole = authData.user?.app_metadata?.role;
     const normalizedRole = typeof rawRole === 'string' ? rawRole.trim().toUpperCase() : '';
 
     if (authError || !authData.user) {
@@ -59,7 +60,19 @@ serve(async (req) => {
       });
     }
 
-    const { message, image } = await req.json();
+    if (req.method !== 'POST') return createJsonResponse(req, { error: 'Method not allowed' }, { status: 405 });
+    if (!normalizedRole) return createJsonResponse(req, { error: 'Forbidden' }, { status: 403 });
+    const { data: allowed, error: rateError } = await authClient.rpc('ng_consume_rate_limit', { operation: 'gemini' });
+    if (rateError) throw rateError;
+    if (!allowed) return createJsonResponse(req, { error: 'Request limit or insufficient authentication' }, { status: 429 });
+    const raw = await readBody(req, 8_000_000);
+    if (raw === null) return createJsonResponse(req, { error: 'Payload too large' }, { status: 413 });
+    let payload;
+    try { payload = JSON.parse(raw); } catch { return createJsonResponse(req, { error: 'Invalid JSON' }, { status: 400 }); }
+    const { message, image } = payload ?? {};
+    if (typeof message !== 'string' || message.length > 4_000 || (image != null && typeof image !== 'string')) {
+      return createJsonResponse(req, { error: 'Invalid request' }, { status: 400 });
+    }
     const apiKey = Deno.env.get('GEMINI_API_KEY');
 
     if (!apiKey) {
@@ -104,13 +117,8 @@ serve(async (req) => {
       let contextData = "[]";
 
       if (ALLOWED_CONTEXT_ROLES.has(normalizedRole)) {
-        const supabaseClient = createClient(
-          supabaseUrl,
-          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        );
-
         // Obtenemos los últimos envíos activos para dar contexto solo a roles autorizados.
-        const { data: shipments, error } = await supabaseClient
+        const { data: shipments, error } = await authClient
           .from('usa_shipment_reports')
           .select('trip_id, project, logistic_status, arrival_date_time, comments, departure_date_time, temperature')
           .neq('logistic_status', 'Finalizado')
@@ -155,7 +163,7 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error("Error en Edge Function:", error);
-    return createJsonResponse(req, { error: error.message }, {
+    return createJsonResponse(req, { error: 'Gemini request failed' }, {
       status: 500,
     });
   }

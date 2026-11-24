@@ -1,10 +1,9 @@
-const CACHE_NAME = 'nglobal-v4'; 
-const LOGO_URL = 'https://sucvgevhsmxrpkpvrblm.supabase.co/storage/v1/object/public/storage/logong.jpeg';
+const CACHE_NAME = 'nglobal-v5'; 
+const LOGO_URL = new URL('icon-192.png', self.registration.scope).href;
 
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json'
+  new URL('index.html', self.registration.scope).href,
+  new URL('manifest.json', self.registration.scope).href
 ];
 
 self.addEventListener('install', (event) => {
@@ -33,23 +32,22 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.href.includes('supabase.co') || 
-      url.href.includes('generativelanguage.googleapis.com') ||
-      event.request.method !== 'GET') {
-    return;
-  }
+  if (url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope) ||
+      url.pathname.includes('/api/') || event.request.method !== 'GET' ||
+      event.request.headers.has('Authorization')) return;
 
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
+          if (!response.ok || response.headers.get('Cache-Control')?.includes('no-store')) return response;
           return caches.open(CACHE_NAME).then((cache) => {
              cache.put(event.request, response.clone());
              return response;
           });
         })
         .catch(() => {
-          return caches.match('/index.html');
+          return caches.match(new URL('index.html', self.registration.scope).href);
         })
     );
     return;
@@ -58,7 +56,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic' && !networkResponse.headers.get('Cache-Control')?.includes('no-store')) {
             caches.open(CACHE_NAME).then((cache) => {
                 cache.put(event.request, networkResponse.clone());
             });
@@ -83,18 +81,19 @@ self.addEventListener('push', (event) => {
   }
 
   // REGLA JEFE: Patrón de vibración SOS para alertas críticas (TEMPERATURA)
-  const isCritical = data.title.includes('ALERTA') || data.title.includes('EXCURSIÓN');
+  const title = typeof data?.title === 'string' ? data.title : 'nglobal Logistics';
+  const isCritical = title.includes('ALERTA') || title.includes('EXCURSIÓN');
   const vibratePattern = isCritical ? [200, 100, 200, 100, 200, 500, 500, 100, 500, 100, 500, 500, 200, 100, 200, 100, 200] : [200, 100, 200];
 
   const options = {
-    body: data.body,
+    body: typeof data?.body === 'string' ? data.body : 'Nueva actividad en el sistema.',
     icon: LOGO_URL,
     badge: LOGO_URL,
     vibrate: vibratePattern,
     tag: isCritical ? 'ng-critical' : 'ng-alert',
     renotify: true,
     data: {
-      url: data.url || '/'
+      url: typeof data?.url === 'string' ? data.url : './'
     },
     // BLOQUE NUEVO: Acciones rápidas desde la notificación
     actions: [
@@ -104,7 +103,7 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title, options)
+    self.registration.showNotification(title, options)
   );
 });
 
@@ -114,12 +113,17 @@ self.addEventListener('notificationclick', (event) => {
   // BLOQUE NUEVO: Manejo de acciones específicas
   if (event.action === 'ignore') return;
 
+  const scope = self.registration.scope;
+  let destination = scope;
+  try {
+    const target = new URL(event.notification.data?.url || './', scope);
+    if (target.href.startsWith(scope)) destination = target.href;
+  } catch { /* Open the application home when the notification URL is invalid. */ }
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      if (windowClients.length > 0) {
-        return windowClients[0].focus();
-      }
-      return clients.openWindow(event.notification.data.url);
+      const windowClient = windowClients.find(client => client.url.startsWith(scope));
+      return windowClient ? windowClient.focus() : clients.openWindow(destination);
     })
   );
 });

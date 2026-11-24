@@ -7,7 +7,7 @@ Write-Host "Iniciando despliegue hacia $ServerIP..." -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
 Write-Host "Empaquetando el proyecto..." -ForegroundColor Yellow
-tar.exe -czvf deploy.tar.gz --exclude=node_modules --exclude=.git --exclude=dist --exclude=dist-desktop --exclude=deploy.tar.gz --exclude=setup.sh --exclude=.env --exclude=.vscode --exclude=.idea --exclude=*.log --exclude=Thumbs.db --exclude=android/.gradle --exclude=android/build --exclude=android/app/build --exclude=android/app/src/main/assets/public --exclude=supabase/.temp .
+tar.exe -czvf deploy.tar.gz --exclude=node_modules --exclude=.git --exclude=dist --exclude=dist-desktop --exclude=deploy.tar.gz --exclude=setup.sh --exclude=.env --exclude='.env.*' --exclude='CLIENTE ID MI CHAMBA.txt' --exclude='token_wpp.md' --exclude=.vscode --exclude=.idea --exclude=*.log --exclude=Thumbs.db --exclude=android/.gradle --exclude=android/build --exclude=android/app/build --exclude=android/app/src/main/assets/public --exclude=supabase/.temp .
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error al empaquetar el proyecto." -ForegroundColor Red
     exit 1

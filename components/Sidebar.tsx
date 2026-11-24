@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, User, UserRole } from '../types';
 import { DownloadIcon, ChartBarIcon, MapIcon, SettingsIcon, TruckIcon, LayoutGridIcon, DatabaseIcon, TableIcon, BoxIcon, EyeIcon } from './icons';
-import { subscribeUserToPush } from '../pushService';
+import { canAccessView } from '../features/auth/access';
+import { subscribeUserToPush } from '../features/alerts/push';
 
 interface SidebarProps {
   currentView: View;
@@ -41,34 +42,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     : 'text-white/60 hover:bg-white/5 hover:text-white'
     }`;
 
-  const canSee = (view: View) => {
-  // 1. Regla especial para la nueva sección de Inspecciones (SOLO Administrador e Inspector)
-  if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
-    return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
-  }
-
-  // 2. Si el rol es INSPECTOR, no debe ver nada más que la sección de inspecciones
-  if (user.role === UserRole.INSPECTOR) {
-    return false;
-  }
-
-  // 3. Reglas existentes para los demás roles
-  if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
-
-  if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-    return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
-  }
-  if (user.role === UserRole.LIDER_PROYECTO) {
-    return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
-  }
-  if (user.role === UserRole.COORDINADOR) {
-    return [View.USA_SHIPMENTS, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
-  }
-  if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-    return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
-  }
-  return false;
-};
+  const canSee = (view: View) => canAccessView(user.role, view);
 
   // Verifica si el usuario tiene permiso para al menos un submenú de inspecciones
   const canSeeInspections = canSee(View.INSPECTION_QUALITY) || canSee(View.INSPECTION_DASHBOARD) || canSee(View.INSPECTION_INCIDENTS);
@@ -145,18 +119,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           </button>
         )}
 
-        <button
-          onClick={() => setCurrentView(View.QUALITY_INSPECTION)}
-          className={`flex items-center gap-3 w-full p-3 rounded-xl font-bold transition-all ${
-            currentView === View.QUALITY_INSPECTION 
-              ? 'bg-blue-600 text-white shadow-md' 
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          {/* Puedes usar cualquier ícono de lucide-react como ClipboardCheck */}
-          <ClipboardCheck className="w-5 h-5" />
-          <span>Inspección Calidad</span>
-        </button>        
 
         {[UserRole.ADMINISTRADOR, UserRole.GERENCIA].includes(user.role) && (
           <div className="pt-4 pb-2 px-4">

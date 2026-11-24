@@ -1,0 +1,10 @@
+project_id = "nglobal"
+
+[functions.tive-webhook]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = true
+
+[functions.gemini-chat]
+verify_jwt = true

@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils/escapeHtml';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -472,7 +473,7 @@ const StrategicPlanningPage: React.FC<StrategicPlanningPageProps> = ({
             const real = realStats[`${p.proyectoId}_${p.productoId}`] || 0;
             rowsHtml += `
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">${projName} / ${prodName}</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">${escapeHtml(projName)} / ${escapeHtml(prodName)}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center; color: #002D62; font-weight: bold;">$${((p as any).ng2025 || p.venta2025Referencia || 0).toLocaleString()}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">$${((p as any).ss2025 || p.precioCompra2025 || 0).toLocaleString()}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${p.presupuestoMonetario.toLocaleString()}</td>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { UsaShipmentReport, ProductoDB, EstatusDB, ClienteDB, TipoUnidad, EscalaDB, ResponsableDB, ProyectoDB, LineaTransporteDB, ShipmentStatus, User, UserRole } from '../types';
 import UsaShipmentForm from './UsaShipmentForm';
@@ -13,7 +13,8 @@ import StaffOnDuty from './StaffOnDuty';
 import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, BoxIcon, TruckIcon, SwitchHorizontalIcon, ExclamationIcon, DatabaseIcon, ClockIcon, UserIcon, PhoneIcon, LayoutGridIcon, TableIcon } from './icons';
 import { useNotification } from './NotificationProvider';
 import { useTiveMonitoring } from './TiveMonitoringProvider';
-import { formatCarrierName, toCamelCase, toSnakeCase } from '../utils/formatters';
+import { saveShipments, deleteShipment, updateShipment } from '../features/shipments/service';
+import { formatCarrierName, toCamelCase } from '../utils/formatters';
 import { TableSkeleton } from './ui/Skeleton';
 
 interface UsaShipmentReportPageProps {
@@ -226,34 +227,20 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         setIsDetailsModalOpen(true);
     };
 
+    const submitting = useRef(false);
     const handleSubmit = async (reportData: any, status: string | null) => {
-        if (!ensureShipmentWriteAccess()) return;
+        if (submitting.current || !ensureShipmentWriteAccess()) return;
+        submitting.current = true;
         try {
             const items = Array.isArray(reportData) ? reportData : [reportData];
-            for (const item of items) {
-                const { id, createdAt, loteOriginalId, loteSecundarioId, ...data } = item as any;
-                const finalStatus = status || data.logisticStatus || 'Confirmado';
-                const payload = { ...data, logisticStatus: finalStatus, loteOriginalId: loteOriginalId || null, loteSecundarioId: loteSecundarioId || null };
-                const dataToSave = toSnakeCase(payload);
-
-                if (id && String(id).length > 15) {
-                    await supabase.from('usa_shipment_reports').update(dataToSave).eq('id', id);
-                } else {
-                    await supabase.from('usa_shipment_reports').insert(dataToSave);
-                }
-
-                if (loteOriginalId) {
-                    await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Cargado' }).eq('id', loteOriginalId);
-                }
-                if (loteSecundarioId) {
-                    await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Cargado' }).eq('id', loteSecundarioId);
-                }
-            }
+            await saveShipments(items, status);
             addNotification({ type: 'success', title: 'Viaje Registrado', message: `Folio oficial ${items[0].tripId} sincronizado.` });
             await fetchData();
             handleCloseForm();
         } catch (error: any) {
             addNotification({ type: 'danger', title: 'Error Crítico', message: error.message || 'Fallo de integridad.' });
+        } finally {
+            submitting.current = false;
         }
     };
 
@@ -261,17 +248,7 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         if (!ensureShipmentWriteAccess()) return;
         if (!reportToDelete) return;
         try {
-            const report = reports.find(r => r.id === reportToDelete);
-            const { error } = await supabase.from('usa_shipment_reports').delete().eq('id', reportToDelete);
-            if (error) throw error;
-
-            // JEFE: Si borramos el embarque, debemos regresar los lotes originales a 'Programado'
-            if (report?.loteOriginalId) {
-                await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Programado' }).eq('id', report.loteOriginalId);
-            }
-            if (report?.loteSecundarioId) {
-                await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Programado' }).eq('id', report.loteSecundarioId);
-            }
+            await deleteShipment(reportToDelete);
 
             setReports(prev => prev.filter(r => r.id !== reportToDelete));
             addNotification({ type: 'success', title: 'Eliminado', message: 'Embarque eliminado y lotes liberados.' });
@@ -289,32 +266,31 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
         if (!reportToComplete) return;
         const report = reports.find(r => r.id === reportToComplete);
         
-        // JEFE: Usamos la fecha seleccionada manualmente por el usuario
-        const finalArrivalDate = new Date(completionDate).toISOString();
-
-        await supabase.from('usa_shipment_reports').update({
-            logistic_status: 'Finalizado',
-            arrival_date_time: finalArrivalDate,
-            rating_pending: true // JEFE: Marcamos para feedback obligatorio
-        }).eq('id', reportToComplete);
-
-        addNotification({ type: 'info', title: 'Viaje Concluido', message: 'Por favor califique el servicio de la línea.' });
-        await fetchData();
-
-        if (report) setReportToRate(report);
-        setReportToComplete(null);
-        handleViewChange('completed');
+        try {
+            await updateShipment(reportToComplete, {
+                logistic_status: 'Finalizado',
+                arrival_date_time: new Date(completionDate).toISOString(),
+                rating_pending: true,
+            });
+            addNotification({ type: 'info', title: 'Viaje Concluido', message: 'Por favor califique el servicio de la línea.' });
+            await fetchData();
+            if (report) setReportToRate(report);
+            setReportToComplete(null);
+            handleViewChange('completed');
+        } catch {
+            addNotification({ type: 'danger', title: 'Error', message: 'No se pudo finalizar el viaje.' });
+        }
     };
 
     const handleConfirmRating = async (rating: number, comments: string) => {
         if (!ensureShipmentWriteAccess()) return;
         if (!reportToRate) return;
         try {
-            await supabase.from('usa_shipment_reports').update({
+            await updateShipment(reportToRate.id, {
                 carrier_rating: rating,
                 carrier_rating_comments: comments,
                 rating_pending: false
-            }).eq('id', reportToRate.id);
+            });
 
             addNotification({ type: 'success', title: 'Auditoría Guardada', message: 'Gracias por su retroalimentación sobre el servicio.' });
             setReportToRate(null);
@@ -629,7 +605,7 @@ const UsaShipmentReportPage: React.FC<UsaShipmentReportPageProps> = ({ initialVi
 
             {isFormOpen && <UsaShipmentForm isOpen={isFormOpen} onClose={handleCloseForm} onSubmit={handleSubmit} initialData={reports.find(r => r.id === selectedReportId) || null} productSpecs={productSpecs} proyectos={proyectos} logisticStatuses={logisticStatuses} clientes={clientes} tiposUnidad={tiposUnidad} escalas={escalas} responsables={responsables} />}
             {isDetailsModalOpen && <ShipmentDetailsModal isOpen={isDetailsModalOpen} onClose={() => setIsDetailsModalOpen(false)} report={reports.find(r => r.id === reportIdForDetails)!} productSpecs={productSpecs} proyectos={proyectos} clientes={clientes} logisticStatuses={logisticStatuses} onCompleteTrip={setReportToComplete} onRefresh={fetchData} />}
-            {isIncidentModalOpen && reportForIncident && <IncidentModal isOpen={isIncidentModalOpen} onClose={() => setIsIncidentModalOpen(false)} report={reportForIncident} logisticStatuses={logisticStatuses} onUpdate={fetchData} />}
+            {isIncidentModalOpen && reportForIncident && <IncidentModal isOpen={isIncidentModalOpen} onClose={() => setIsIncidentModalOpen(false)} report={reportForIncident} canWrite={canManageShipments} />}
             {reportToRate && (
                 <CarrierRatingModal
                     isOpen={!!reportToRate}

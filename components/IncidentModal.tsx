@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { supabase } from '../lib/supabase';
-import { UsaShipmentReport, Incident, EstatusDB } from '../types';
-import { TrashIcon, PlusIcon, ExclamationIcon, MapPinIcon } from './icons';
+import { UsaShipmentReport, Incident } from '../types';
+import { PlusIcon, ExclamationIcon } from './icons';
 import { useNotification } from './NotificationProvider';
-import { saveToSyncQueue } from '../utils/offlineStorage';
-import { sendWhatsAppText } from '../lib/whatsappService';
+import { incidentsChanged, listIncidents, queueIncident, syncIncidents, type ListedIncident } from '../features/shipments/incidents';
 
 interface IncidentModalProps {
     isOpen: boolean;
     onClose: () => void;
     report: UsaShipmentReport;
-    logisticStatuses: EstatusDB[];
-    onUpdate: () => void;
+    canWrite: boolean;
 }
 
 const INCIDENT_TYPES = [
@@ -25,11 +23,11 @@ const INCIDENT_TYPES = [
     'Otro'
 ];
 
-const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, logisticStatuses, onUpdate }) => {
+const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, canWrite }) => {
     const { addNotification } = useNotification();
-    const [incidents, setIncidents] = useState<Incident[]>([]);
+    const [incidents, setIncidents] = useState<ListedIncident[]>([]);
     const [isAdding, setIsAdding] = useState(false);
-    const [currentStatus, setCurrentStatus] = useState(report.logisticStatus);
+    const [ownerId, setOwnerId] = useState<string>();
     const [newIncident, setNewIncident] = useState<Incident>({
         type: '',
         location: '',
@@ -38,60 +36,55 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
     });
     const [saving, setSaving] = useState(false);
 
+    const loadIncidents = async (account: string) => {
+        const recent = await listIncidents(account, report.id);
+        const legacy = Array.isArray(report.incidents) ? report.incidents : [];
+        return [...legacy, ...recent].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    };
+
     useEffect(() => {
-        if (isOpen && report) {
-            setIncidents(Array.isArray(report.incidents) ? report.incidents : []);
-            setIsAdding(false);
-            setCurrentStatus(report.logisticStatus);
-        }
+        if (!isOpen) return;
+        let active = true;
+        setIsAdding(false);
+        setOwnerId(undefined);
+        setIncidents(Array.isArray(report.incidents) ? report.incidents : []);
+        const refresh = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!active || !session?.user.id) return;
+                setOwnerId(session.user.id);
+                const list = await loadIncidents(session.user.id);
+                if (active) {
+                    setIncidents(list);
+                }
+            } catch {
+                if (active) addNotification({ type: 'danger', title: 'Incidencias', message: 'No se pudo cargar la bitácora.' });
+            }
+        };
+        void refresh();
+        window.addEventListener(incidentsChanged, refresh);
+        return () => {
+            active = false;
+            window.removeEventListener(incidentsChanged, refresh);
+        };
     }, [isOpen, report]);
 
     const handleAddIncident = async () => {
-        if (!newIncident.type || !newIncident.description) {
+        if (!ownerId || !canWrite || saving) return;
+        if (!newIncident.type || !newIncident.description.trim()) {
             addNotification({ type: 'warning', title: 'Datos faltantes', message: 'Tipo y descripción son obligatorios.' });
             return;
         }
-
         setSaving(true);
-        const updatedIncidents = [...incidents, { ...newIncident, timestamp: new Date().toISOString() }];
-        
         try {
-            // Intentar guardado normal
-            const { error } = await supabase
-                .from('usa_shipment_reports')
-                .update({ incidents: updatedIncidents })
-                .eq('id', report.id);
-
-            if (error) throw error;
-
-            setIncidents(updatedIncidents);
+            const incident = { ...newIncident, timestamp: new Date().toISOString() };
+            const id = await queueIncident(ownerId, report.id, incident);
+            setIncidents(previous => [{ ...incident, id, pending: true }, ...previous]);
             setIsAdding(false);
             setNewIncident({ type: '', location: '', timestamp: '', description: '' });
-            addNotification({ type: 'success', title: 'Bitácora Actualizada', message: 'La incidencia se ha registrado correctamente.' });
-            
-            // WHATSAPP_NOTIFICATION_TRIGGER
-            try {
-                // Number should be the coordinator's or a fallback
-                const coordinatorPhone = "523312345678"; // Example placeholder
-                await sendWhatsAppText(coordinatorPhone, `🚨 *INCIDENCIA DETECTADA* \n🚢 *Viaje:* ${report.tripId}\n⚠️ *Tipo:* ${newIncident.type}\n📍 *Ubicación:* ${newIncident.location || 'No especificada'}\n📝 *Detalle:* ${newIncident.description}`);
-                console.log("NOTIFICACIÓN_WS_ENVIADA");
-            } catch (wsErr) {
-                console.error("Fallo envío WhatsApp:", wsErr);
-            }
-
-            onUpdate();
-        } catch (error) {
-            // MI DIOS: MANEJO OFFLINE
-            console.warn("Fallo de red detectado. Guardando en cola de sincronización.");
-            await saveToSyncQueue('usa_shipment_reports_incidents', { id: report.id, incidents: updatedIncidents }, 'UPDATE');
-            
-            setIncidents(updatedIncidents);
-            setIsAdding(false);
-            addNotification({ 
-                type: 'warning', 
-                title: 'Modo Offline', 
-                message: 'Sin conexión. La incidencia se guardó localmente y se enviará al recuperar señal.' 
-            });
+            void syncIncidents(ownerId).catch(console.error);
+        } catch {
+            addNotification({ type: 'danger', title: 'Incidencias', message: 'No se pudo guardar la incidencia en el dispositivo.' });
         } finally {
             setSaving(false);
         }
@@ -136,6 +129,7 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
                                     <textarea 
                                         className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs font-bold outline-none h-20"
                                         placeholder="Detalles..."
+                                        maxLength={3000}
                                         value={newIncident.description}
                                         onChange={e => setNewIncident({...newIncident, description: e.target.value})}
                                     ></textarea>
@@ -154,21 +148,21 @@ const IncidentModal: React.FC<IncidentModalProps> = ({ isOpen, onClose, report, 
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            <button 
+                            {canWrite && ownerId && <button
                                 onClick={() => setIsAdding(true)}
                                 className="w-full bg-danger text-white py-2.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2"
                             >
                                 <PlusIcon className="w-4 h-4" /> Reportar Incidencia
-                            </button>
+                            </button>}
 
                             {incidents.length === 0 ? (
                                 <div className="py-10 text-center opacity-40 italic text-xs">Sin registros críticos.</div>
                             ) : (
                                 <div className="space-y-3">
-                                    {[...incidents].reverse().map((inc, i) => (
-                                        <div key={i} className="bg-white p-3 rounded-xl border border-border shadow-sm border-l-4 border-l-danger">
+                                    {incidents.map((inc, i) => (
+                                        <div key={inc.id || i} className="bg-white p-3 rounded-xl border border-border shadow-sm border-l-4 border-l-danger">
                                             <div className="flex justify-between items-start mb-1">
-                                                <span className="text-[9px] font-black text-danger uppercase">{inc.type}</span>
+                                                <span className="text-[9px] font-black text-danger uppercase">{inc.type}{inc.rejected ? ' · Requiere revisión' : inc.pending ? ' · Pendiente de sincronizar' : ''}</span>
                                                 <span className="text-[8px] font-bold text-text-muted">{new Date(inc.timestamp).toLocaleDateString()}</span>
                                             </div>
                                             <p className="text-[10px] text-text-secondary leading-tight">{inc.description}</p>

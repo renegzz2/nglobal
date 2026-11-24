@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { promoteShipment } from '../features/shipments/service';
 import { supabase } from '../lib/supabase';
 import { LiderProgramacionUsaReport, ProductoDB, ProyectoDB, ClienteDB, User, UserRole } from '../types';
 import LiderProgramacionUsaForm from './LiderProgramacionUsaForm';
@@ -316,7 +317,7 @@ const LiderProgramacionUsaPage: React.FC<LiderProgramacionUsaPageProps> = ({ use
 
             let error;
             if (isEditing) {
-                const result = await supabase.from('lider_programacion_usa_reports').update(dataToSave).eq('id', id);
+                const result = await supabase.from('lider_programacion_usa_reports').update(dataToSave).eq('id', id).select('id').single();
                 error = result.error;
             } else {
                 const result = await supabase.from('lider_programacion_usa_reports').insert(dataToSave);
@@ -375,7 +376,7 @@ const LiderProgramacionUsaPage: React.FC<LiderProgramacionUsaPageProps> = ({ use
             // JEFE: Sanitización de fecha para evitar duplicar 'T' en el timestamp
             const finalDeparture = report.fechaSalida ? new Date(report.fechaSalida).toISOString() : new Date().toISOString();
 
-            const { error } = await supabase.from('usa_shipment_reports').insert(toSnakeCase({
+            await promoteShipment({
                 tripId: report.combinedLoteIds.join(' / '),
                 project: projects,
                 projectId: report.projectId,
@@ -386,16 +387,12 @@ const LiderProgramacionUsaPage: React.FC<LiderProgramacionUsaPageProps> = ({ use
                 departureDateTime: finalDeparture,
                 loteOriginalId: report.id,
                 loteSecundarioId: report.partnerData?.id || null
-            }));
-            if (error) throw error;
-
-            await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Cargado' }).eq('id', report.id);
-            if (report.partnerData) {
-                await supabase.from('lider_programacion_usa_reports').update({ usa_logistics_status: 'Cargado' }).eq('id', report.partnerData.id);
-            }
+            });
 
             addNotification({ type: 'success', title: 'Envío Generado', message: 'Promovido a embarque.' });
             fetchData();
+        } catch (error: any) {
+            addNotification({ type: 'danger', title: 'Error', message: error.message || 'No se pudo generar el embarque.' });
         } finally {
             setPromoting(null);
         }

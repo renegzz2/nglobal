@@ -4,20 +4,6 @@ import { User } from '../types';
 import { signInWithPassword, sendMagicLink } from '../lib/supabase';
 import { useNotification } from './NotificationProvider';
 
-declare module 'react/jsx-runtime' {
-  export {};
-}
-
-declare namespace JSX {
-  interface Element {}
-  interface IntrinsicAttributes {
-    [key: string]: any;
-  }
-  interface IntrinsicElements {
-    [elemName: string]: any;
-  }
-}
-
 interface LoginProps {
   onLogin: (user: User) => void;
   onShowPolicies?: () => void;

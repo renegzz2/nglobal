@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import Card from './ui/Card';
 import { SettingsIcon, MapIcon, ExclamationIcon, DownloadIcon, ClockIcon } from './icons';
 import { useNotification } from './NotificationProvider';
-import { subscribeUserToPush, sendTestPush } from '../pushService';
+import { subscribeUserToPush, sendTestPush } from '../features/alerts/push';
 import RelojChecador from './RelojChecador';
 
 interface SettingsPageProps {

@@ -26,11 +26,13 @@ interface TransportUnit {
     lineaId: string;
     unidadId: string;
     driverName: string;
+    driverPhone: string;
     unitType: string;
     tractorPlates: string;
     boxNumber: string;
     sealNumber: string;
     temperature: string;
+    minTemperature: string;
     totalRealBoxes: string;
     tiveTrackerId: string;
     hasTiveTracker: boolean;
@@ -47,6 +49,7 @@ interface TransportUnit {
 
 interface AuditProduct extends ProductQuantity {
     id: string;
+    sourceLotId?: string;
 }
 
 interface UsaShipmentFormProps {
@@ -173,14 +176,13 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
         stopOverProjectId: '',
         sucursalId: '',
         clientId: '',
-        isConsolidated: false,
+        clientIds: [] as string[],
+        lotesAsociados: [] as string[],
         products: [] as AuditProduct[],
         departureDateTime: '',
         realDepartureDate: '',
         arrivalDateTime: '',
         temperatureIdeal: null as number | string | null,
-        loteOriginalId: null as string | null,
-        loteSecundarioId: null as string | null,
         secondaryStatus: '' as string 
     });
 
@@ -190,7 +192,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     const [loadingResources, setLoadingResources] = useState(false);
 
     const [units, setUnits] = useState<TransportUnit[]>([
-        { id: Math.random().toString(), lineaId: '', unidadId: '', driverName: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', temperature: '', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+        { id: crypto.randomUUID(), lineaId: '', unidadId: '', driverName: '', driverPhone: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
     ]);
     const [isQuickUnitModalOpen, setIsQuickUnitModalOpen] = useState(false);
     const [activeUnitIdForQuickAdd, setActiveUnitIdForQuickAdd] = useState<string | null>(null);
@@ -198,9 +200,19 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
     useEffect(() => {
         const fetchResources = async () => {
             setLoadingResources(true);
+            
+            let initialLotes: string[] = [];
+            if (initialData?.lotesAsociados && Array.isArray(initialData.lotesAsociados)) {
+                initialLotes = initialData.lotesAsociados;
+            } else {
+                if (initialData?.loteOriginalId) initialLotes.push(initialData.loteOriginalId);
+                if (initialData?.loteSecundarioId) initialLotes.push(initialData.loteSecundarioId);
+            }
+
             const lotsQuery = supabase.from('lider_programacion_usa_reports').select('*');
-            if (initialData?.loteOriginalId) {
-                lotsQuery.or(`usa_logistics_status.eq.Programado,id.eq.${initialData.loteOriginalId}`);
+            if (initialLotes.length > 0) {
+                const inFilter = `(${initialLotes.join(',')})`;
+                lotsQuery.or(`usa_logistics_status.eq.Programado,id.in.${inFilter}`);
             } else {
                 lotsQuery.eq('usa_logistics_status', 'Programado');
             }
@@ -216,19 +228,41 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             setLoadingResources(false);
         };
         if (isOpen) fetchResources();
-    }, [isOpen]);
+    }, [isOpen, initialData]);
 
     useEffect(() => {
+        if (!isOpen) return;
+
         if (initialData) {
             const initialProjectId = initialData.projectId || (initialData.project ? MANUAL_PROJECT_OPTION : '');
+            
+            let initialLotes: string[] = [];
+            if (initialData.lotesAsociados && Array.isArray(initialData.lotesAsociados)) {
+                initialLotes = initialData.lotesAsociados;
+            } else {
+                if (initialData.loteOriginalId) initialLotes.push(initialData.loteOriginalId);
+                if (initialData.loteSecundarioId) initialLotes.push(initialData.loteSecundarioId);
+            }
+
+            // Sincronización robusta de consignatarios / multicliente
+            let initialClientIds: string[] = [];
+            if (initialData.clientIds && Array.isArray(initialData.clientIds) && initialData.clientIds.length > 0) {
+                initialClientIds = initialData.clientIds;
+            } else if ((initialData as any).client_ids && Array.isArray((initialData as any).client_ids) && (initialData as any).client_ids.length > 0) {
+                initialClientIds = (initialData as any).client_ids;
+            } else if (initialData.clientId) {
+                initialClientIds = [initialData.clientId];
+            }
+
             setBaseData({
-                tripId: initialData.tripId,
-                project: initialData.project,
+                tripId: initialData.tripId || '',
+                project: initialData.project || '',
                 projectId: initialProjectId,
                 stopOverProjectId: initialData.stopOverProjectId || '',
                 sucursalId: initialData.sucursalId || '',
-                clientId: initialData.clientId || '',
-                isConsolidated: initialData.isConsolidated,
+                clientId: initialData.clientId || (initialClientIds[0] || ''),
+                clientIds: initialData.clientIds || (initialData.clientId ? [initialData.clientId] : []),
+                lotesAsociados: initialLotes,
                 products: (initialData.products || []).map(p => ({
                     ...p,
                     id: Math.random().toString(),
@@ -238,14 +272,13 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                     realQty: p.realQty || p.quantity,
                     invoiceNumber: p.invoiceNumber || '',
                     invoiceUrl: p.invoiceUrl || '',
-                    mid: p.mid || ''
+                    mid: p.mid || '',
+                    sourceLotId: p.sourceLotId || p.source_lot_id || null
                 })) as AuditProduct[],
                 departureDateTime: toInputDateTime(initialData.departureDateTime),
                 realDepartureDate: toInputDateTime(initialData.realDepartureDate),
                 arrivalDateTime: toInputDateTime(initialData.arrivalDateTime),
                 temperatureIdeal: initialData.idealTemp || initialData.temperature || null,
-                loteOriginalId: initialData.loteOriginalId || null,
-                loteSecundarioId: initialData.loteSecundarioId || null,
                 secondaryStatus: initialData.comments?.includes('[HOLD]') ? 'Hold' : ''
             });
             
@@ -256,11 +289,13 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 lineaId: initialData.lineaTransportistaId || '',
                 unidadId: initialData.unidadTransporteId || '',
                 driverName: initialData.driverName || '',
+                driverPhone: initialData.driverPhone || '',
                 unitType: initialData.unitType || '',
                 tractorPlates: initialData.tractorPlates || '',
                 boxNumber: initialData.boxNumber || '',
                 sealNumber: initialData.sealNumber || '',
-                temperature: String(initialData.temperature || ''),
+                minTemperature: String(initialData.min_temp || '45.0'),
+                temperature: String(initialData.temperature || initialData.idealTemp || '51.0'),
                 totalRealBoxes: String(initialData.totalRealBoxes || ''),
                 tiveTrackerId: isUsingTripIdAsTive ? '' : (initialData.tiveTrackerId || ''),
                 hasTiveTracker: !isUsingTripIdAsTive,
@@ -274,15 +309,81 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 freightCostMxn: initialData.comments?.match(/\[MXN:([\d.]+)\]/)?.[1] || '',
                 isNew: false
             }]);
+        } else {
+            // Reiniciar estado limpio para nuevo viaje
+            setBaseData({
+                tripId: '',
+                project: '',
+                projectId: '',
+                stopOverProjectId: '',
+                sucursalId: '',
+                clientId: '',
+                clientIds: [],
+                lotesAsociados: [],
+                products: [],
+                departureDateTime: '',
+                realDepartureDate: '',
+                arrivalDateTime: '',
+                temperatureIdeal: null,
+                secondaryStatus: ''
+            });
+            setUnits([
+                { id: crypto.randomUUID(), lineaId: '', unidadId: '', driverName: '',driverPhone: '', unitType: '', tractorPlates: '', boxNumber: '', sealNumber: '', minTemperature: '45.0', temperature: '51.0', totalRealBoxes: '', tiveTrackerId: '', hasTiveTracker: true, palletsAsigned: 0, logisticStatus: 'Confirmado', caat: '', alpha: '', transferAgent: '', transferPhone: '', freightCost: '', freightCostMxn: '', isNew: true }
+            ]);
         }
-    }, [initialData]);
+    }, [initialData, isOpen]);
 
-    const handleSelectPrimaryLot = (loteId: string) => {
-        if (!loteId) return;
+    const handleAddLot = (loteId: string) => {
+        if (!loteId || baseData.lotesAsociados.includes(loteId)) return;
         const lote = pendingLots.find(l => l.id === loteId);
         if (!lote) return;
 
-        const e1Products = (lote.productos || []).map((p: any) => ({
+        // =================================================================
+        // MOTOR DE VALIDACIÓN TÉRMICA PARA CONSOLIDACIÓN (MULTICLIENTE/LTL)
+        // =================================================================
+        if (baseData.lotesAsociados.length > 0) {
+            // 1. Extraemos la configuración térmica actual del camión
+            const currentMin = parseFloat(units[0].minTemperature);
+            const currentMax = parseFloat(units[0].temperature);
+
+            let isCompatible = true;
+            let conflictingProduct = '';
+
+            // 2. Evaluamos cada producto del nuevo lote a ingresar
+            for (const p of (lote.productos || [])) {
+                const prodId = p.productId || p.product_id;
+                const spec = productSpecs.find(s => s.id === prodId);
+                
+                if (spec) {
+                    // Usamos tus columnas exactas de types.ts
+                    // Limite Tolerable (Mínima) y Limite Superior (Máxima)
+                    const prodMin = Number(spec.limiteTolerable ?? (spec.tempOptima ? spec.tempOptima - 3 : 45.0));
+                    const prodMax = Number(spec.limiteSuperior ?? 51.0);
+
+                    // 3. Verificamos si el rango del camión choca con los límites seguros del producto
+                    if (currentMin < prodMin || currentMax > prodMax) {
+                        isCompatible = false;
+                        conflictingProduct = spec.nombreDelProducto || 'Producto Especial';
+                        break;
+                    }
+                }
+            }
+
+            // 4. Detonamos la alerta en pantalla si son incompatibles
+            if (!isCompatible) {
+                const confirmed = window.confirm(
+                    `⚠️ ADVERTENCIA DE INCOMPATIBILIDAD TÉRMICA ⚠️\n\n` +
+                    `La temperatura actual del camión (${currentMin}°F a ${currentMax}°F) NO ES APTA para el producto que deseas conciliar: ${conflictingProduct}.\n\n` +
+                    `¿Estás absolutamente seguro de forzar la consolidación de este viaje?`
+                );
+                
+                // Si el usuario cancela, no agregamos el lote
+                if (!confirmed) return; 
+            }
+        }
+        // =================================================================
+
+        const newProducts = (lote.productos || []).map((p: any) => ({
             ...p,
             id: Math.random().toString(),
             productId: p.productId || p.product_id || (p.manualProductName || p.manual_product_name ? MANUAL_PRODUCT_OPTION : ''),
@@ -290,67 +391,49 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             projectedQty: p.quantity || p.cantidad || 0,
             realQty: p.quantity || p.cantidad || 0,
             invoiceNumber: '',
-            invoiceUrl: ''
+            invoiceUrl: '',
+            sourceLotId: lote.id 
         })) as AuditProduct[];
+
+        const newLotes = [...baseData.lotesAsociados, lote.id];
+        const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
+        const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
 
         setBaseData(prev => ({
             ...prev,
-            project: lote.proyecto as string,
-            projectId: lote.projectId || (lote.proyecto ? MANUAL_PROJECT_OPTION : ''),
-            loteOriginalId: lote.id,
-            products: e1Products,
-            departureDateTime: toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`),
-            temperatureIdeal: lote.temperaturaIdeal || null,
+            lotesAsociados: newLotes,
+            project: newProjectName,
+            products: [...prev.products, ...newProducts],
+            departureDateTime: prev.lotesAsociados.length === 0 ? toInputDateTime(`${String(lote.fechaSalida || '').split('T')[0] || new Date().toISOString().split('T')[0]}T08:00:00`) : prev.departureDateTime,
+            temperatureIdeal: prev.lotesAsociados.length === 0 ? (lote.temperaturaIdeal || null) : prev.temperatureIdeal,
         }));
 
-        const totalSum = e1Products.reduce((acc, p) => acc + Number(p.realQty), 0);
-        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(totalSum) })));
-        addNotification({ type: 'success', title: 'Lote Vinculado', message: `Carga de ${lote.proyecto} cargada al formulario.` });
+        const newTotal = [...baseData.products, ...newProducts].reduce((acc, p) => acc + Number(p.realQty), 0);
+        setUnits(prev => prev.map(u => ({ 
+            ...u, 
+            totalRealBoxes: String(newTotal),
+            temperature: baseData.lotesAsociados.length === 0 ? String(lote.temperaturaIdeal || '48.2') : u.temperature 
+        })));
+        
+        addNotification({ type: 'success', title: 'Lote Añadido', message: `Carga de ${lote.proyecto} integrada al viaje.` });
     };
 
-    const handleAddConsolidation = (loteId: string) => {
-        if (!loteId) return;
-        const lote = pendingLots.find(l => l.id === loteId);
-        if (!lote) return;
-
-        const e2Products = (lote.productos || []).map((p: any) => ({
-            ...p,
-            id: Math.random().toString(),
-            productId: p.productId || p.product_id || (p.manualProductName || p.manual_product_name ? MANUAL_PRODUCT_OPTION : ''),
-            manualProductName: p.manualProductName || p.manual_product_name || '',
-            projectedQty: p.quantity || p.cantidad || 0,
-            realQty: p.quantity || p.cantidad || 0,
-            invoiceNumber: '',
-            invoiceUrl: ''
-        })) as AuditProduct[];
+    const handleRemoveLot = (loteId: string) => {
+        const newLotes = baseData.lotesAsociados.filter(id => id !== loteId);
+        const activeLots = pendingLots.filter(l => newLotes.includes(l.id));
+        const newProjectName = activeLots.map(l => l.proyecto).join(' / ');
+        const newProducts = baseData.products.filter(p => p.sourceLotId !== loteId);
 
         setBaseData(prev => ({
             ...prev,
-            isConsolidated: true,
-            stopOverProjectId: lote.projectId || '',
-            loteSecundarioId: lote.id,
-            project: prev.project.includes(' / ') ? prev.project : `${prev.project} / ${lote.proyecto}`,
-            products: [...prev.products, ...e2Products]
+            lotesAsociados: newLotes,
+            project: newProjectName,
+            products: newProducts
         }));
 
-        const newTotal = [...baseData.products, ...e2Products].reduce((acc, p) => acc + Number(p.realQty), 0);
+        const newTotal = newProducts.reduce((acc, p) => acc + Number(p.realQty), 0);
         setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: String(newTotal) })));
-        addNotification({ type: 'info', title: 'Remolque Virtual', message: `Fusión de carga: ${lote.proyecto}` });
-    };
-
-    const handleClearLot = () => {
-        setBaseData(prev => ({
-            ...prev,
-            loteOriginalId: null,
-            loteSecundarioId: null,
-            stopOverProjectId: '',
-            projectId: '',
-            products: [],
-            project: '',
-            isConsolidated: false
-        }));
-        setUnits(prev => prev.map(u => ({ ...u, totalRealBoxes: '0' })));
-        addNotification({ type: 'warning', title: 'Lote Desvinculado', message: 'Se han removido los productos asociados.' });
+        addNotification({ type: 'warning', title: 'Lote Removido', message: 'Se ha desvinculado la carga y sus productos correspondientes.' });
     };
 
     const handleUnitChange = (id: string, field: keyof TransportUnit, value: any) => {
@@ -454,15 +537,18 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
 
         const payloads = units.map((u) => ({
             id: u.isNew ? undefined : u.id,
+            clientMutationId: u.isNew ? u.id : undefined,
             tripId: baseData.tripId,
             project: baseData.projectId === MANUAL_PROJECT_OPTION ? baseData.project.trim() : baseData.project,
             projectId: baseData.projectId === MANUAL_PROJECT_OPTION ? '' : baseData.projectId,
             stopOverProjectId: baseData.stopOverProjectId || null,
             sucursalId: baseData.sucursalId,
-            clientId: baseData.clientId,
+            clientId: baseData.clientIds.length > 0 ? baseData.clientIds[0] : null,
+            clientIds: baseData.clientIds,
             lineaTransportistaId: u.lineaId || null,
             unidadTransporteId: u.unidadId || null,
-            isConsolidated: baseData.isConsolidated,
+            isConsolidated: baseData.lotesAsociados.length > 1,
+            lotesAsociados: baseData.lotesAsociados,
             products: baseData.products.map(({ id, ...p }) => ({
                 ...p,
                 productId: p.productId === MANUAL_PRODUCT_OPTION ? '' : p.productId,
@@ -473,10 +559,12 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                 ? new Date().toISOString() 
                 : (baseData.departureDateTime ? new Date(baseData.departureDateTime).toISOString() : null),
             driverName: u.driverName,
+            driverPhone: u.driverPhone,
             unitType: u.unitType,
             tractorPlates: u.tractorPlates,
             boxNumber: u.boxNumber,
             sealNumber: u.sealNumber,
+            min_temp: parseFloat(u.minTemperature) || null,
             temperature: parseFloat(u.temperature) || null,
             totalRealBoxes: parseInt(u.totalRealBoxes) || null,
             idealTemp: baseData.temperatureIdeal,
@@ -484,8 +572,6 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
             caat: u.caat, alpha: u.alpha, transferAgent: u.transferAgent, transferPhone: u.transferPhone, freightCost: parseFloat(u.freightCost) || null,
             realDepartureDate: baseData.realDepartureDate ? new Date(baseData.realDepartureDate).toISOString() : null,
             arrivalDateTime: baseData.arrivalDateTime ? new Date(baseData.arrivalDateTime).toISOString() : null,
-            loteOriginalId: baseData.loteOriginalId,
-            loteSecundarioId: baseData.loteSecundarioId,
             comments: (() => {
                 let comm = initialData?.comments || '';
                 comm = comm.replace(/\[HOLD\]\s*/g, '').replace(/\[MXN:[\d.]+\s*\]\s*/g, '').trim();
@@ -518,7 +604,7 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                             <h3 className="text-2xl font-black text-primary uppercase tracking-tight">Gestión de Despacho Internacional</h3>
                             <div className="flex items-center gap-2 mt-1">
                                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                                <p className="text-text-muted text-[10px] font-bold uppercase tracking-[0.1em]">Configuración de Activos y Remolque Virtual</p>
+                                <p className="text-text-muted text-[10px] font-bold uppercase tracking-[0.1em]">Configuración de Activos y Consolidación Dinámica</p>
                             </div>
                         </div>
                     </div>
@@ -546,83 +632,100 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <label className={labelClasses}>Lote Maestro (Agenda)</label>
-                                        <div className="flex gap-2">
-                                            <select
-                                                className={`${inputClasses} flex-1`}
-                                                onChange={(e) => handleSelectPrimaryLot(e.target.value)}
-                                                value={baseData.loteOriginalId || ''}
-                                            >
-                                                <option value="">{baseData.loteOriginalId ? 'Cambiar lote vinculado...' : 'Seleccionar lote programado...'}</option>
-                                                {pendingLots.map(l => (
-                                                    <option key={l.id} value={l.id}>{l.loteId} — {l.proyecto}</option>
-                                                ))}
-                                            </select>
-                                            {baseData.loteOriginalId && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleClearLot}
-                                                    className="p-2.5 bg-danger/10 text-danger rounded-xl hover:bg-danger/20 transition-all border border-danger/20"
-                                                    title="Desvincular Lote"
-                                                >
-                                                    <TrashIcon className="w-5 h-5" />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <label className={labelClasses}>Sede de Origen</label>
-                                            <select
-                                                value={baseData.projectId}
-                                                onChange={(e) => {
-                                                    if (e.target.value === MANUAL_PROJECT_OPTION) {
-                                                        setBaseData({ ...baseData, projectId: MANUAL_PROJECT_OPTION, project: baseData.project || '' });
-                                                        return;
-                                                    }
-                                                    const selectedProject = proyectos.find(p => p.id === e.target.value);
-                                                    setBaseData({ ...baseData, projectId: e.target.value, project: selectedProject?.nombre || '' });
-                                                }}
-                                                className={inputClasses}
-                                                required
-                                            >
-                                                <option value="">Seleccionar...</option>
-                                                <option value={MANUAL_PROJECT_OPTION}>+ Proyecto no registrado</option>
-                                                {proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                                            </select>
-                                            {baseData.projectId === MANUAL_PROJECT_OPTION && (
-                                                <input
-                                                    type="text"
-                                                    value={baseData.project}
-                                                    onChange={(e) => setBaseData({ ...baseData, project: e.target.value.toUpperCase() })}
-                                                    className={inputClasses}
-                                                    placeholder="Nombre del proyecto manual"
-                                                    required
-                                                />
-                                            )}
-                                        </div>
-                                        <div><label className={labelClasses}>Consignatario *</label><select value={baseData.clientId} onChange={(e) => setBaseData({ ...baseData, clientId: e.target.value })} className={inputClasses}><option value="">Seleccionar...</option>{clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div>
-                                    </div>
-
                                     <div className="bg-accent/[0.03] p-5 rounded-2xl border border-dashed border-accent/20">
                                         <div className="flex items-center gap-2 mb-3">
                                             <SwitchHorizontalIcon className="w-4 h-4 text-accent" />
-                                            <span className="text-[10px] font-black text-accent uppercase tracking-wider">Consolidación de Carga (E2)</span>
+                                            <span className="text-[10px] font-black text-accent uppercase tracking-wider">Añadir Lotes Programados</span>
                                         </div>
                                         <select
                                             className="w-full bg-white border border-accent/20 rounded-xl px-4 py-2 text-xs font-bold text-primary outline-none focus:ring-4 focus:ring-accent/5 transition-all"
-                                            onChange={(e) => handleAddConsolidation(e.target.value)}
-                                            value={baseData.loteSecundarioId || ''}
-                                            disabled={!baseData.loteOriginalId}
+                                            onChange={(e) => { handleAddLot(e.target.value); e.target.value = ''; }}
+                                            value=""
                                         >
-                                            <option value="">Añadir carga secundaria...</option>
-                                            {pendingLots.filter(l => l.id !== baseData.loteOriginalId).map(l => (
+                                            <option value="" disabled>+ Seleccionar lote para integrar al viaje...</option>
+                                            {pendingLots.filter(l => !baseData.lotesAsociados.includes(l.id)).map(l => (
                                                 <option key={l.id} value={l.id}>{l.loteId} — {l.proyecto}</option>
                                             ))}
                                         </select>
+
+                                        {baseData.lotesAsociados.length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mt-4">
+                                                {baseData.lotesAsociados.map(loteId => {
+                                                    const lote = pendingLots.find(l => l.id === loteId) || { loteId: 'Desconocido', proyecto: 'Histórico' };
+                                                    return (
+                                                        <div key={loteId} className="flex items-center gap-2 bg-primary/10 border border-primary/20 text-primary px-3 py-1.5 rounded-xl shadow-sm">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest">{lote.loteId}</span>
+                                                            <span className="text-[10px] font-bold opacity-80">{lote.proyecto}</span>
+                                                            <button 
+                                                                type="button" 
+                                                                onClick={() => handleRemoveLot(loteId)} 
+                                                                className="ml-1 p-0.5 hover:bg-primary/20 hover:text-danger rounded-full transition-colors"
+                                                                title="Remover lote y sus productos"
+                                                            >
+                                                                <XIcon className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className={labelClasses}>Sede de Origen / Proyecto</label>
+                                            <input
+                                                type="text"
+                                                value={baseData.project}
+                                                onChange={(e) => setBaseData({ ...baseData, project: e.target.value.toUpperCase(), projectId: MANUAL_PROJECT_OPTION })}
+                                                className={inputClasses}
+                                                placeholder="Nombre consolidado del proyecto"
+                                                required
+                                            />
+                                        </div>
+                                        
+                                        <div className="space-y-2">
+                                            <label className={labelClasses}>Consignatarios (Multicliente) *</label>
+                                            <select
+                                                className={inputClasses}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (val && !baseData.clientIds.includes(val)) {
+                                                        setBaseData(prev => ({ ...prev, clientIds: [...prev.clientIds, val] }));
+                                                    }
+                                                    e.target.value = '';
+                                                }}
+                                                value=""
+                                            >
+                                                <option value="" disabled>+ Añadir cliente al viaje...</option>
+                                                {clientes.filter(c => !baseData.clientIds.includes(c.id)).map(c => (
+                                                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                                                ))}
+                                            </select>
+                                            
+                                            {/* Etiquetas de clientes seleccionados */}
+                                            {baseData.clientIds.length > 0 && (
+                                                <div className="flex flex-wrap gap-2 mt-3">
+                                                    {baseData.clientIds.map(id => {
+                                                        const c = clientes.find(x => x.id === id);
+                                                        return (
+                                                            <div key={id} className="flex items-center gap-2 bg-success/10 border border-success/20 text-success px-3 py-1.5 rounded-xl shadow-sm">
+                                                                <span className="text-[10px] font-black uppercase tracking-widest">{c?.nombre || 'Desconocido'}</span>
+                                                                <button 
+                                                                    type="button" 
+                                                                    onClick={() => setBaseData(prev => ({...prev, clientIds: prev.clientIds.filter(x => x !== id)}))} 
+                                                                    className="ml-1 p-0.5 hover:bg-success/20 hover:text-danger rounded-full transition-colors"
+                                                                >
+                                                                    <XIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className={labelClasses}>Salida Real</label>
@@ -812,7 +915,28 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                    )}
                                                 </div>
                                             </div>
-                                            <div><label className={labelClasses}>Nombre del Operador *</label><input type="text" value={unit.driverName} onChange={(e) => handleUnitChange(unit.id, 'driverName', e.target.value.toUpperCase())} className={inputClasses} placeholder="NOMBRE COMPLETO" /></div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className={labelClasses}>Nombre del Operador *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.driverName} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'driverName', e.target.value.toUpperCase())} 
+                                                        className={inputClasses} 
+                                                        placeholder="NOMBRE COMPLETO" 
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Celular del Operador *</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={unit.driverPhone} 
+                                                        onChange={(e) => handleUnitChange(unit.id, 'driverPhone', e.target.value)} 
+                                                        className={inputClasses} 
+                                                        placeholder="000-000-0000" 
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
                                         <div className="space-y-6">
                                             <div>
@@ -846,9 +970,19 @@ const UsaShipmentForm: React.FC<UsaShipmentFormProps> = ({
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div><label className={labelClasses}>Set Point (°F)</label><input type="text" value={unit.temperature} onChange={(e) => handleUnitChange(unit.id, 'temperature', e.target.value)} className={inputClasses} placeholder="35.0" /></div>
-                                                <div><label className={labelClasses}>Total de Cajas</label><input type="number" value={unit.totalRealBoxes} onChange={(e) => handleUnitChange(unit.id, 'totalRealBoxes', e.target.value)} className={inputClasses} /></div>
+                                            <div className="grid grid-cols-3 gap-4">
+                                                <div>
+                                                    <label className={labelClasses}>Temp Mín (°F)</label>
+                                                    <input type="text" value={unit.minTemperature} onChange={(e) => handleUnitChange(unit.id, 'minTemperature', e.target.value)} className={inputClasses} placeholder="45.0" />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Temp Máx (°F)</label>
+                                                    <input type="text" value={unit.temperature} onChange={(e) => handleUnitChange(unit.id, 'temperature', e.target.value)} className={inputClasses} placeholder="51.0" />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>Total de Cajas</label>
+                                                    <input type="number" value={unit.totalRealBoxes} onChange={(e) => handleUnitChange(unit.id, 'totalRealBoxes', e.target.value)} className={inputClasses} />
+                                                </div>
                                             </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div><label className={labelClasses}>Sello Fiscal</label><input type="text" value={unit.sealNumber} onChange={(e) => handleUnitChange(unit.id, 'sealNumber', e.target.value)} className={inputClasses} placeholder="999999" /></div>

@@ -1,5 +1,5 @@
 const DEFAULT_ALLOWED_HEADERS = "authorization, x-client-info, apikey, content-type";
-const DEFAULT_ALLOWED_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+const DEFAULT_ALLOWED_METHODS = "POST, OPTIONS";
 
 declare const Deno: {
   env?: {
@@ -36,20 +36,19 @@ function getAllowedOrigin(req: Request) {
 
 export function buildCorsHeaders(req: Request, extraHeaders: HeadersInit = {}) {
   const allowedOrigin = getAllowedOrigin(req);
-  const requestedHeaders = req.headers.get("access-control-request-headers");
 
   return {
-    "Access-Control-Allow-Origin": allowedOrigin || "null",
-    "Access-Control-Allow-Headers": requestedHeaders ?? DEFAULT_ALLOWED_HEADERS,
+    ...(allowedOrigin ? { "Access-Control-Allow-Origin": allowedOrigin } : {}),
+    "Access-Control-Allow-Headers": DEFAULT_ALLOWED_HEADERS,
     "Access-Control-Allow-Methods": DEFAULT_ALLOWED_METHODS,
     "Access-Control-Max-Age": "86400",
-    Vary: "Origin, Access-Control-Request-Headers",
+    Vary: "Origin",
     ...extraHeaders,
   };
 }
 
 export function createOptionsResponse(req: Request) {
-  return new Response("ok", { headers: buildCorsHeaders(req) });
+  return new Response(null, { status: getAllowedOrigin(req) ? 204 : 403, headers: buildCorsHeaders(req) });
 }
 
 export function createJsonResponse(req: Request, body: unknown, init: ResponseInit = {}) {

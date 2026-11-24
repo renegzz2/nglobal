@@ -6,9 +6,11 @@ import { NotificationProvider } from './components/NotificationProvider';
 import { TiveMonitoringProvider } from './components/TiveMonitoringProvider';
 import NotificationsContainer from './components/NotificationsContainer';
 import Login from './components/Login';
-import Portal from './components/Portal';
+import { syncIncidents } from './features/shipments/incidents';
+import type { Session } from '@supabase/supabase-js';
+import { AdminMfa } from './features/auth/AdminMfa';
+import { canAccessView } from './features/auth/access';
 import ChatMessenger from './components/ChatMessenger';
-import { subscribeUserToPush } from './pushService';
 import { TableSkeleton } from './components/ui/Skeleton';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { Capacitor } from '@capacitor/core';
@@ -33,40 +35,16 @@ const FreightPaymentPage = lazy(() => import('./components/FreightPaymentPage'))
 const InventoryPage = lazy(() => import('./components/InventoryPage'));
 const PoliciesPage = lazy(() => import('./components/PoliciesPage'));
 
-const INSECURE_ROLE_PICKER_ENABLED = import.meta.env.VITE_ENABLE_INSECURE_ROLE_PICKER === 'true';
-
 const ROLE_MAP: Record<string, UserRole> = Object.values(UserRole).reduce((acc, role) => {
   acc[role] = role;
   return acc;
 }, {} as Record<string, UserRole>);
 
 const getRoleFromAuthUser = (authUser: any): UserRole | null => {
-  const rawRole = authUser?.app_metadata?.role || authUser?.user_metadata?.role;
+  const rawRole = authUser?.app_metadata?.role;
   if (typeof rawRole !== 'string') return null;
   const normalizedRole = rawRole.trim().toUpperCase();
-  return ROLE_MAP[normalizedRole] ?? null;
-};
-
-const getStoredAuthProfile = (): User | null => {
-  try {
-    const saved = localStorage.getItem('ng_auth_profile');
-    if (!saved) return null;
-
-    const parsed = JSON.parse(saved);
-    if (!parsed || typeof parsed.name !== 'string' || typeof parsed.role !== 'string') return null;
-
-    const normalizedRole = parsed.role.trim().toUpperCase();
-    const role = ROLE_MAP[normalizedRole];
-    if (!role) return null;
-
-    return {
-      name: parsed.name,
-      role,
-      avatar: typeof parsed.avatar === 'string' ? parsed.avatar : undefined,
-    };
-  } catch {
-    return null;
-  }
+  return Object.hasOwn(ROLE_MAP, normalizedRole) ? ROLE_MAP[normalizedRole] : null;
 };
 
 const buildUserFromAuth = (authUser: any): User | null => {
@@ -87,8 +65,10 @@ const buildUserFromAuth = (authUser: any): User | null => {
 };
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [authUser, setAuthUser] = useState<any>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const authUser = session?.user;
+  const [mfaVerifiedToken, setMfaVerifiedToken] = useState<string>();
+  const user = buildUserFromAuth(authUser);
   const [authVerified, setAuthVerified] = useState(false);
   const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 768);
@@ -135,44 +115,24 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setAuthUser(session?.user || null);
-      if (!session?.user) {
-        setUser(null);
-        localStorage.removeItem('ng_selected_role');
-        localStorage.removeItem('ng_auth_profile');
-      }
-    });
-
-    // Si el usuario es INSPECTOR y su vista actual no es de inspecciones, redirigir a Inspección Calidad 
-    useEffect(() => {
-    if (user?.role === UserRole.INSPECTOR) {
-      if (![View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(currentView)) {
-        setCurrentView(View.INSPECTION_QUALITY);
-      }
-    }
-  }, [user, currentView]);
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthUser(session?.user || null);
-      if (!session?.user) {
-        setUser(null);
-        localStorage.removeItem('ng_selected_role');
-        localStorage.removeItem('ng_auth_profile');
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
       setAuthVerified(true);
     });
+    localStorage.removeItem('ng_selected_role');
+    localStorage.removeItem('ng_auth_profile');
 
-    // Detect /politicas route
-    if (window.location.pathname === '/politicas') {
-      setCurrentView(View.POLICIES);
-    }
-
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') document.documentElement.classList.add('dark');
+    if (window.location.pathname === '/politicas') setCurrentView(View.POLICIES);
+    if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (user?.role === UserRole.INSPECTOR && !canAccessView(user.role, currentView)) {
+      setCurrentView(View.INSPECTION_QUALITY);
+    }
+  }, [user?.role, currentView]);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -186,40 +146,28 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!authUser) return;
+    if (!authUser?.id) return;
+    const controller = new AbortController();
+    const sync = () => void syncIncidents(authUser.id, controller.signal).catch(console.error);
+    window.addEventListener('online', sync);
+    const retry = window.setInterval(sync, 60_000);
+    sync();
+    return () => {
+      controller.abort();
+      window.removeEventListener('online', sync);
+      window.clearInterval(retry);
+    };
+  }, [authUser?.id]);
 
-    const secureUser = buildUserFromAuth(authUser);
-    if (secureUser) {
-      setUser(secureUser);
-      localStorage.setItem('ng_auth_profile', JSON.stringify(secureUser));
-      localStorage.removeItem('ng_selected_role');
-      return;
-    }
-
-    const storedProfile = getStoredAuthProfile();
-    if (storedProfile) {
-      setUser(storedProfile);
-      return;
-    }
-
-    if (INSECURE_ROLE_PICKER_ENABLED) {
-      try {
-        const saved = localStorage.getItem('ng_selected_role');
-        const legacyUser = saved ? JSON.parse(saved) : null;
-        setUser(legacyUser);
-        if (legacyUser) {
-          localStorage.setItem('ng_auth_profile', JSON.stringify(legacyUser));
-        }
-      } catch {
-        setUser(null);
-      }
-      return;
-    }
-
-    setUser(null);
-    localStorage.removeItem('ng_selected_role');
-    localStorage.removeItem('ng_auth_profile');
-  }, [authUser]);
+  useEffect(() => {
+    const token = session?.access_token;
+    if (!token || user?.role !== UserRole.ADMINISTRADOR) return;
+    let active = true;
+    void supabase.auth.mfa.getAuthenticatorAssuranceLevel(token).then(({ data }) => {
+      if (active && data?.currentLevel === 'aal2') setMfaVerifiedToken(token);
+    });
+    return () => { active = false; };
+  }, [session?.access_token, user?.role]);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -230,16 +178,8 @@ const App: React.FC = () => {
 
 
   const handleLogout = async () => {
-    setUser(null);
-    localStorage.removeItem('ng_selected_role');
-    localStorage.removeItem('ng_auth_profile');
-  };
-
-  const handleRoleSelection = (u: User) => {
-    if (!INSECURE_ROLE_PICKER_ENABLED) return;
-    setUser(u);
-    localStorage.setItem('ng_selected_role', JSON.stringify(u));
-    localStorage.setItem('ng_auth_profile', JSON.stringify(u));
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('Error al cerrar sesión:', error.message);
   };
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
@@ -248,39 +188,10 @@ const App: React.FC = () => {
   const renderContent = () => {
   if (!user) return null;
 
-  // 1. Matriz estricta de permisos
-  const canAccess = (view: View) => {
-    // Las 3 vistas de Inspección SOLO pueden ser vistas por ADMINISTRADOR e INSPECTOR
-    if ([View.INSPECTION_QUALITY, View.INSPECTION_DASHBOARD, View.INSPECTION_INCIDENTS].includes(view)) {
-      return [UserRole.ADMINISTRADOR, UserRole.INSPECTOR].includes(user.role);
-    }
-
-    // El rol INSPECTOR NO puede ver ninguna otra vista del sistema
-    if (user.role === UserRole.INSPECTOR) {
-      return false;
-    }
-
-    // Permisos existentes para los demás roles
-    if ([UserRole.GERENCIA, UserRole.ADMINISTRADOR].includes(user.role)) return true;
-    if ([UserRole.DIRECCION, UserRole.SUBDIRECCION].includes(user.role)) {
-      return [View.DASHBOARD, View.STRATEGIC_PLANNING, View.EXEC_REPORT, View.TIVE_MAP, View.USA_SHIPMENTS, View.SETTINGS, View.FREIGHT_PAYMENTS].includes(view);
-    }
-    if (user.role === UserRole.LIDER_PROYECTO) {
-      return [View.STRATEGIC_PLANNING, View.LIDER_PROGRAMACION_USA, View.SETTINGS].includes(view);
-    }
-    if (user.role === UserRole.COORDINADOR) {
-      return [View.USA_SHIPMENTS, View.TIVE_MAP, View.INVENTORY, View.SETTINGS].includes(view);
-    }
-    if ([UserRole.SUBGERENCIA, UserRole.ADMINISTRATIVO].includes(user.role)) {
-      return [View.USA_SHIPMENTS, View.DATABASE, View.TIVE_MAP, View.SETTINGS, View.FREIGHT_PAYMENTS, View.INVENTORY].includes(view);
-    }
-    return false;
-  };
-
   let component;
   
   // 2. Redirección de respaldo si no tiene acceso a la vista solicitada
-  if (!canAccess(currentView)) {
+  if (!canAccessView(user.role, currentView)) {
     if (user.role === UserRole.INSPECTOR) {
       // Placeholder temporal mientras creamos los componentes de inspección
       component = (
@@ -294,18 +205,18 @@ const App: React.FC = () => {
     } else if (user.role === UserRole.LIDER_PROYECTO) {
       component = <StrategicPlanningPage user={user} />;
     } else {
-      component = <Dashboard onViewChange={setCurrentView} />;
+      component = <Dashboard onViewChange={setCurrentView} userRole={user.role} />;
     }
   } else {
     // 3. Renderizado de la vista solicitada
     switch (currentView) {
-      case View.DASHBOARD: component = <Dashboard onViewChange={setCurrentView} />; break;
+      case View.DASHBOARD: component = <Dashboard onViewChange={setCurrentView} userRole={user.role} />; break;
       case View.DATABASE: component = <BaseDeDatosPage user={user} />; break;
       case View.USA_SHIPMENTS: component = <UsaShipmentReportPage initialView="active" user={user} />; break;
       case View.LIDER_PROGRAMACION_USA: component = <LiderProgramacionUsaPage user={user} />; break;
       case View.FRUIT_QUALITY: component = <FruitQualityChecker />; break;
       case View.STRATEGIC_PLANNING: component = <StrategicPlanningPage user={user} />; break;
-      case View.EXEC_REPORT: component = <ClientReportDashboard />; break;
+      case View.EXEC_REPORT: component = <ClientReportDashboard userRole={user.role} />; break;
       case View.TIVE_MAP: component = <TiveMapPage />; break;
       case View.SETTINGS: component = <SettingsPage user={user} onNavigate={setCurrentView} />; break;
       case View.FREIGHT_PAYMENTS: component = <FreightPaymentPage />; break;
@@ -332,7 +243,7 @@ const App: React.FC = () => {
         );
         break;
 
-      default: component = <Dashboard onViewChange={setCurrentView} />;
+      default: component = <Dashboard onViewChange={setCurrentView} userRole={user.role} />;
     }
   }
 
@@ -405,17 +316,13 @@ const App: React.FC = () => {
 
   // MI DIOS: Portal de acceso unificado por áreas
   if (!user) {
-    if (!INSECURE_ROLE_PICKER_ENABLED) {
-      return (
+    return (
         <NotificationProvider>
           <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center p-6">
             <div className="max-w-xl w-full bg-white rounded-[2rem] border border-border shadow-xl p-8 text-center">
               <h2 className="text-2xl font-black text-primary uppercase tracking-tight">Rol no configurado</h2>
               <p className="mt-4 text-sm text-text-secondary font-medium">
-                La cuenta autenticada no tiene un rol válido en `app_metadata.role` o `user_metadata.role`.
-              </p>
-              <p className="mt-2 text-xs text-text-muted font-bold uppercase tracking-widest">
-                El selector manual de roles fue deshabilitado por seguridad.
+                Solicita a administración que asigne un rol a tu cuenta.
               </p>
               <button
                 onClick={() => supabase.auth.signOut()}
@@ -427,24 +334,11 @@ const App: React.FC = () => {
           </div>
           <NotificationsContainer />
         </NotificationProvider>
-      );
-    }
-
-    return (
-      <NotificationProvider>
-        <div className="fixed top-6 right-6 z-50 animate-fade-in">
-           <button 
-             onClick={() => supabase.auth.signOut()} 
-             className="text-[10px] font-black uppercase tracking-widest bg-white/80 backdrop-blur text-danger px-4 py-3 border border-danger/20 rounded-xl shadow-lg hover:bg-danger hover:text-white transition-all flex items-center gap-2"
-           >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-              Cerrar Sesión
-           </button>
-        </div>
-        <Portal onLogin={handleRoleSelection} />
-        <NotificationsContainer />
-      </NotificationProvider>
     );
+  }
+
+  if (user.role === UserRole.ADMINISTRADOR && mfaVerifiedToken !== session?.access_token) {
+    return <AdminMfa />;
   }
 
   return (

@@ -1,3 +1,5 @@
+import { updateShipment } from '../features/shipments/service';
+import { escapeHtml } from '../utils/escapeHtml';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -117,10 +119,10 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
 
             manifestHtml += `
                 <tr>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee;">${spec?.nombreDelProducto || p.manualProductName || p.manual_product_name || 'S/D'}</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${p.invoiceNumber || '-'}</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${qty.toLocaleString()}</td>
-                    <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${weight.toLocaleString()} KG</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">${escapeHtml(spec?.nombreDelProducto || p.manualProductName || p.manual_product_name || 'S/D')}</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${escapeHtml(p.invoiceNumber || '-')}</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${escapeHtml(qty.toLocaleString())}</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">${escapeHtml(weight.toLocaleString())} KG</td>
                 </tr>
             `;
         });
@@ -162,10 +164,10 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
             <body>
                 <div class="page">
                     <div class="header">
-                        <img src="${logoUrl}" class="logo">
+                        <img src="${escapeHtml(logoUrl)}" class="logo">
                         <div class="title-block">
                             <h1>Ficha Técnica de Despacho</h1>
-                            <p>FOLIO: ${report.tripId}</p>
+                            <p>FOLIO: ${escapeHtml(report.tripId)}</p>
                         </div>
                     </div>
 
@@ -173,19 +175,19 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                     <div class="route-flow">
                         <div class="route-point">
                             <span class="label">Punto de Origen (E1)</span>
-                            <div class="value">${origin}</div>
+                            <div class="value">${escapeHtml(origin)}</div>
                         </div>
                         ${stopOver ? `
                         <div class="route-arrow">→</div>
                         <div class="route-point">
                             <span class="label">Escala Técnica (E2)</span>
-                            <div class="value" style="color: #2563eb;">${stopOver}</div>
+                            <div class="value" style="color: #2563eb;">${escapeHtml(stopOver)}</div>
                         </div>
                         ` : ''}
                         <div class="route-arrow">→</div>
                         <div class="route-point">
                             <span class="label">Destino Final</span>
-                            <div class="value">${dest}</div>
+                            <div class="value">${escapeHtml(dest)}</div>
                         </div>
                     </div>
 
@@ -195,19 +197,19 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                             <div class="data-box">
                                 <div style="margin-bottom: 12px;">
                                     <span class="label">Línea Transportista</span>
-                                    <div class="value">${line}</div>
+                                    <div class="value">${escapeHtml(line)}</div>
                                 </div>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-                                    <div><span class="label">Placas Tractor</span><div class="value">${report.tractorPlates || 'S/D'}</div></div>
-                                    <div><span class="label">Placas Caja</span><div class="value">${report.boxNumber || 'S/D'}</div></div>
+                                    <div><span class="label">Placas Tractor</span><div class="value">${escapeHtml(report.tractorPlates || 'S/D')}</div></div>
+                                    <div><span class="label">Placas Caja</span><div class="value">${escapeHtml(report.boxNumber || 'S/D')}</div></div>
                                 </div>
                                 <div style="margin-bottom: 12px;">
                                     <span class="label">Operador</span>
-                                    <div class="value">${report.driverName || 'N/A'}</div>
+                                    <div class="value">${escapeHtml(report.driverName || 'N/A')}</div>
                                 </div>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                                    <div><span class="label">CAAT</span><div class="value">${report.caat || 'N/A'}</div></div>
-                                    <div><span class="label">ALPHA CODE</span><div class="value">${report.alpha || 'N/A'}</div></div>
+                                    <div><span class="label">CAAT</span><div class="value">${escapeHtml(report.caat || 'N/A')}</div></div>
+                                    <div><span class="label">ALPHA CODE</span><div class="value">${escapeHtml(report.alpha || 'N/A')}</div></div>
                                 </div>
                             </div>
                         </div>
@@ -216,19 +218,19 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                             <div class="data-box">
                                 <div style="margin-bottom: 12px;">
                                     <span class="label">Estatus Logístico Actual</span>
-                                    <div class="value" style="color: #16a34a;">${report.logisticStatus}</div>
+                                    <div class="value" style="color: #16a34a;">${escapeHtml(report.logisticStatus)}</div>
                                 </div>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-                                    <div><span class="label">Set-Point Autorizado</span><div class="value">${mainProductSpec?.tempOptima || '--'} °F</div></div>
-                                    <div><span class="label">Sello de Seguridad</span><div class="value">${report.sealNumber || 'S/D'}</div></div>
+                                    <div><span class="label">Set-Point Autorizado</span><div class="value">${escapeHtml(mainProductSpec?.tempOptima || '--')} °F</div></div>
+                                    <div><span class="label">Sello de Seguridad</span><div class="value">${escapeHtml(report.sealNumber || 'S/D')}</div></div>
                                 </div>
                                 <div style="margin-bottom: 12px;">
                                     <span class="label">Tracker Tive ID</span>
-                                    <div class="value">${report.tiveTrackerId || 'No asignado'}</div>
+                                    <div class="value">${escapeHtml(report.tiveTrackerId || 'No asignado')}</div>
                                 </div>
                                 <div>
                                     <span class="label">Fecha y Hora de Despacho</span>
-                                    <div class="value">${formatFullSafeDate(report.departureDateTime)}</div>
+                                    <div class="value">${escapeHtml(formatFullSafeDate(report.departureDateTime))}</div>
                                 </div>
                             </div>
                         </div>
@@ -250,8 +252,8 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                         <tfoot>
                             <tr>
                                 <td colspan="2" style="padding: 12px 10px; border-top: 2px solid #002D62;">TOTALES CONSOLIDADOS</td>
-                                <td style="padding: 12px 10px; border-top: 2px solid #002D62; text-align: center; font-size: 13px;">${totalBoxes.toLocaleString()}</td>
-                                <td style="padding: 12px 10px; border-top: 2px solid #002D62; text-align: right; font-size: 13px;">${totalWeight.toLocaleString()} KG</td>
+                                <td style="padding: 12px 10px; border-top: 2px solid #002D62; text-align: center; font-size: 13px;">${escapeHtml(totalBoxes.toLocaleString())}</td>
+                                <td style="padding: 12px 10px; border-top: 2px solid #002D62; text-align: right; font-size: 13px;">${escapeHtml(totalWeight.toLocaleString())} KG</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -266,8 +268,8 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
                     </div>
 
                     <div class="footer">
-                        Documento generado automáticamente por la Plataforma nglobal Logistics Center el ${new Date().toLocaleString()}<br>
-                        Código de Verificación Operativa: ${report.id.substring(0, 8).toUpperCase()} | Enterprise Solution v3.0
+                        Documento generado automáticamente por la Plataforma nglobal Logistics Center el ${escapeHtml(new Date().toLocaleString())}<br>
+                        Código de Verificación Operativa: ${escapeHtml(report.id.substring(0, 8).toUpperCase())} | Enterprise Solution v3.0
                     </div>
                 </div>
             </body>
@@ -336,12 +338,7 @@ const ShipmentDetailsModal: React.FC<ShipmentDetailsModalProps> = ({ isOpen, onC
         }
 
         try {
-            const { error } = await supabase
-                .from('usa_shipment_reports')
-                .update(updateData)
-                .eq('id', report.id);
-            
-            if (error) throw error;
+            await updateShipment(report.id, updateData);
             addNotification({ type: 'success', title: 'Estatus Sincronizado', message: `El embarque se ha movido a: ${newStatus}` });
             if (onRefresh) onRefresh();
         } catch (e: any) {

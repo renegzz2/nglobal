@@ -11,9 +11,15 @@ import { createServer } from "http";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
 import crypto from "crypto";
+import { UserRole } from "./types";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const SERVER_KEY = process.env.SUPABASE_SERVER_KEY;
+const whatsappDatabase = SUPABASE_URL && SERVER_KEY
+  ? createClient(SUPABASE_URL, SERVER_KEY, { auth: { persistSession: false, autoRefreshToken: false } })
+  : null;
+
 const supabase = SUPABASE_URL && SUPABASE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
@@ -36,7 +42,6 @@ const wsAuthAttempts = new Map<string, WsRateLimitEntry>();
 
 const getClientIp = (req: any) =>
   String(
-    req.headers?.["x-forwarded-for"]?.toString().split(",")[0].trim() ||
     req.socket?.remoteAddress ||
     "unknown"
   );
@@ -78,13 +83,13 @@ const getAllowedWhatsAppSenders = () =>
   new Set(
     String(process.env.WHATSAPP_ALLOWED_SENDERS || "")
       .split(",")
-      .map((value) => normalizePhone(value).slice(-10))
+      .map(normalizePhone)
       .filter(Boolean)
   );
 
 const verifyWhatsAppSignature = (rawBody: Buffer | undefined, signatureHeader: string | undefined) => {
   const appSecret = process.env.WHATSAPP_APP_SECRET;
-  if (!appSecret || !rawBody || !signatureHeader?.startsWith("sha256=")) return false;
+  if (!appSecret || !rawBody || !/^sha256=[0-9a-f]{64}$/i.test(signatureHeader || "")) return false;
 
   const expected = crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
   const received = signatureHeader.slice("sha256=".length);
@@ -159,9 +164,9 @@ async function startServer() {
       (req as any).rawBody = Buffer.from(buf);
     }
   }));
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
   const server = createServer(app);
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ server, maxPayload: 16_384 });
 
   // WebSocket logic for real-time chat
   const clients = new Map<WebSocket, ConnectedClient>();
@@ -190,10 +195,15 @@ async function startServer() {
 
           const { data: authData, error } = await supabase.auth.getUser(data.accessToken);
           const authUser = authData.user;
-          const rawRole = authUser?.app_metadata?.role || authUser?.user_metadata?.role;
+          const rawRole = authUser?.app_metadata?.role;
           const normalizedRole = typeof rawRole === 'string' ? rawRole.trim().toUpperCase() : '';
 
-          if (error || !authUser || !normalizedRole) {
+          const isKnownRole = Object.values(UserRole).some(role => role === normalizedRole);
+          const assurance = normalizedRole === UserRole.ADMINISTRADOR && !error
+            ? (await supabase.auth.mfa.getAuthenticatorAssuranceLevel(data.accessToken)).data?.currentLevel
+            : 'aal2';
+
+          if (error || !authUser || !isKnownRole || assurance !== 'aal2') {
             ws.send(JSON.stringify({ type: 'auth_error', message: 'Unauthorized' }));
             ws.close();
             return;
@@ -310,16 +320,26 @@ async function startServer() {
       return;
     }
 
-    if (body.object) {
+    if (body?.object) {
       const messageObj = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-      if (messageObj) {
-        const phone_number_id = body.entry[0].changes[0].value.metadata.phone_number_id;
+      if (messageObj?.id && messageObj.from) {
+        const phone_number_id = body.entry[0].changes[0].value.metadata?.phone_number_id;
         const from = messageObj.from;
         const msg_body = messageObj.text?.body;
-        const normalizedSender = normalizePhone(from).slice(-10);
+        const normalizedSender = normalizePhone(from);
         const allowedSenders = getAllowedWhatsAppSenders();
 
-        console.log(`[WS] Message from ${from} to ${phone_number_id}: ${msg_body}`);
+        if (!phone_number_id || phone_number_id !== process.env.WHATSAPP_PHONE_ID ||
+            !allowedSenders.has(normalizedSender)) {
+          res.sendStatus(200);
+          return;
+        }
+        if (!whatsappDatabase) { res.sendStatus(503); return; }
+        const { data: claimed, error: claimError } = await whatsappDatabase.rpc('ng_claim_webhook', {
+          channel: 'whatsapp', event_key: messageObj.id
+        });
+        if (claimError) { res.sendStatus(503); return; }
+        if (!claimed) { res.sendStatus(200); return; }
         
         // Broadcast to Dashboard UI via WebSocket
         clients.forEach((info, client) => {
@@ -338,25 +358,15 @@ async function startServer() {
         // ============================================
         if (msg_body && process.env.WHATSAPP_ACCESS_TOKEN) {
           try {
-            // 1. Buscar si el operador tiene viajes activos (transfer_phone puede tener formato distinto, probamos ilike o like)
-            if (!supabase) {
-              throw new Error("Supabase is not configured on the server.");
-            }
-
-            if (allowedSenders.size > 0 && !allowedSenders.has(normalizedSender)) {
-              console.warn(`[Bot] Sender ${normalizedSender} is not allowlisted.`);
-              res.sendStatus(200);
-              return;
-            }
-
-            const { data: trips } = await supabase
+            const { data: trips, error: tripsError } = await whatsappDatabase
               .from('usa_shipment_reports')
               .select('id, trip_id, project, logistic_status, arrival_date_time, real_departure_date, comments, transfer_phone')
-              .filter('transfer_phone', 'ilike', `%${from.slice(-10)}%`) // Buscamos los últimos 10 dígitos del teléfono
+              .filter('transfer_phone', 'ilike', `%${normalizedSender.slice(-10)}%`) // Buscamos los últimos 10 dígitos del teléfono
               .neq('logistic_status', 'Finalizado')
               .limit(3);
 
-            const activeTrips = trips || [];
+            if (tripsError) throw tripsError;
+            const activeTrips = (trips || []).filter((trip) => normalizePhone(trip.transfer_phone) === normalizedSender);
             const matchedStatus = detectOperationalStatus(msg_body);
             let replyText = "Mensaje recibido. Si necesitas actualizar estatus, responde con frases como en camino, entregado, retrasado o hold.";
 
@@ -382,13 +392,14 @@ async function startServer() {
                 const auditLine = `[BOT ${new Date().toISOString()}] ${normalizedSender}: ${msg_body}`;
                 updatePayload.comments = trip.comments ? `${trip.comments}\n${auditLine}` : auditLine;
 
-                const { error: updateError } = await supabase
+                const { data: updated, error: updateError } = await whatsappDatabase
                   .from('usa_shipment_reports')
                   .update(updatePayload)
                   .eq('id', trip.id)
-                  .eq('transfer_phone', trip.transfer_phone);
+                  .eq('transfer_phone', trip.transfer_phone)
+                  .eq('logistic_status', trip.logistic_status).select('id').maybeSingle();
 
-                if (updateError) {
+                if (updateError || !updated) {
                   console.error("Error actualizando viaje desde el bot:", updateError);
                   replyText = `Recibi tu actualizacion, pero no pude registrar el cambio del viaje ${trip.trip_id}.`;
                 } else {
@@ -416,7 +427,7 @@ async function startServer() {
               }
             }
 
-            await fetch(`https://graph.facebook.com/v17.0/${phone_number_id}/messages`, {
+            const delivery = await fetch(`https://graph.facebook.com/v22.0/${phone_number_id}/messages`, {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
@@ -429,88 +440,13 @@ async function startServer() {
                 text: { body: replyText }
               })
             });
-            console.log(`[Bot] Respondio exitosamente a ${from}`);
+            if (!delivery.ok) throw new Error(`Meta HTTP ${delivery.status}`);
             res.sendStatus(200);
             return;
-
-            const contextData = trips && trips.length > 0 
-              ? JSON.stringify(trips) 
-              : "No se encontraron viajes activos asociados a este número de teléfono.";
-
-            // 2. Procesar con Gemini
-            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-            
-            const systemInstruction = `
-              Eres el 'Asistente Operativo' de nglobal Logistics. 
-              Estás conversando por WhatsApp con el operador (conductor) cuyo número es ${from}.
-              
-              CONTEXTO ACTUAL DE SUS VIAJES:
-              ${contextData}
-
-              INSTRUCCIONES CRÍTICAS DE SALIDA:
-              SIEMPRE debes responder ÚNICAMENTE con un objeto JSON válido (sin markdown ni texto extra), usando exactamente este formato:
-              {
-                "reply": "Tu mensaje amigable, corto y con emojis para el chofer en WhatsApp. Ayúdale a ubicarse con su viaje.",
-                "updateDB": true o false (true SOLO si está reportando claramente un nuevo estatus o avance),
-                "tripIdToUpdate": "el campo 'id' de la BD del viaje que se va a actualizar (no el trip_id, sino el UUID largo). Null si no aplica",
-                "newStatus": "En Tránsito" | "Entregado" | "Retrasado" | "Pendiente" | "Hold" | null
-              }
-              Si el chofer dice 'En camino', updateDB debe ser true, y newStatus 'En Tránsito'.
-            `;
-
-            const prompt = `Operador dice: "${msg_body}"`;
-
-            const response = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
-              contents: prompt,
-              config: { 
-                systemInstruction,
-                responseMimeType: "application/json"
-              }
-            });
-
-            // Parsear la respuesta JSON de Gemini
-            let aiText = "Entendido. Procesando info...";
-            try {
-              const aiData = JSON.parse(response.text || "{}");
-              aiText = aiData.reply || aiText;
-
-              if (aiData.updateDB && aiData.tripIdToUpdate && aiData.newStatus) {
-                // Actualizar DB en segundo plano
-                const { error: updateError } = await supabase
-                  .from('usa_shipment_reports')
-                  .update({ logistic_status: aiData.newStatus })
-                  .eq('id', aiData.tripIdToUpdate);
-                  
-                if (updateError) {
-                  console.error("Error actualizando viaje desde el bot:", updateError);
-                } else {
-                  console.log(`[Bot] Viaje ${aiData.tripIdToUpdate} actualizado a ${aiData.newStatus}`);
-                }
-              }
-            } catch (pErr) {
-              console.error("Error parseando respuesta JSON de Gemini:", pErr);
-              // Fallback si Gemini por alguna razón devolvió texto plano
-              aiText = response.text || aiText;
-            }
-
-            // 3. Enviar respuesta por WhatsApp
-            await fetch(`https://graph.facebook.com/v17.0/${phone_number_id}/messages`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                messaging_product: "whatsapp",
-                to: from,
-                type: "text",
-                text: { body: aiText }
-              })
-            });
-            console.log(`[Bot] Respondio exitosamente a ${from}`);
           } catch (error) {
-            console.error("[Bot Error] Error en lógica de AI/Respuesta", error);
+            console.error("[Bot] Error procesando mensaje:", error instanceof Error ? error.message : "desconocido");
+            res.sendStatus(502);
+            return;
           }
         }
       }
@@ -557,8 +493,9 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const host = process.env.HOST || (isProduction ? "0.0.0.0" : "127.0.0.1");
+  server.listen(PORT, host, () => {
+    console.log(`Server running on http://${host}:${PORT}`);
   });
 }
 

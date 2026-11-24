@@ -33,3 +33,7 @@ android/build/
 android/app/build/
 android/.idea/
 build/
+
+# Archivos locales con credenciales
+/CLIENTE ID MI CHAMBA.txt
+/token_wpp.md

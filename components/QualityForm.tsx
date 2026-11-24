@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { crearInspeccion } from '../features/inspections/service';
 import { supabase } from '../lib/supabase';
 import { Productor, Huerta } from '../types';
 
@@ -153,8 +154,7 @@ export const QualityForm: React.FC<{ onSuccess?: () => void }> = ({ onSuccess })
                 observaciones
             };
 
-            const { error } = await supabase.from('inspecciones').insert([payload]);
-            if (error) throw error;
+            await crearInspeccion(payload);
 
             alert('Inspección guardada correctamente');
             if (onSuccess) onSuccess();

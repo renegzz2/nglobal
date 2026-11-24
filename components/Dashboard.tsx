@@ -11,21 +11,19 @@ import StaffOnDuty from './StaffOnDuty';
 
 interface DashboardProps {
   onViewChange: (view: View) => void;
+  userRole: UserRole;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onViewChange }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onViewChange, userRole }) => {
   const { latestTiveData } = useTiveMonitoring();
   const [stats, setStats] = useState({ total: 0, inTransit: 0, delayed: 0, completed: 0, efficiencyPercent: 0 });
   const [recentShipments, setRecentShipments] = useState<any[]>([]);
   const [alertComments, setAlertComments] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState<string | null>(null);
   const [selectedWidget, setSelectedWidget] = useState<'tendencia' | 'rendimiento'>('tendencia');
   const [chartData, setChartData] = useState<{name: string, value: number}[]>([]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('ng_auth_profile');
-    if (savedUser) setUserRole(JSON.parse(savedUser).role);
     const fetchStats = async () => {
       try {
         const [shipmentsRes, productsRes] = await Promise.all([

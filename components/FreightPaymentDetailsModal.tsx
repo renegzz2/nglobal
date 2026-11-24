@@ -65,10 +65,7 @@ const FreightPaymentDetailsModal: React.FC<FreightPaymentDetailsModalProps> = ({
                 invoiceReceivedDate: formData.invoiceReceived && !report.invoiceReceived ? new Date().toISOString() : report.invoiceReceivedDate,
             });
 
-            const { error } = await supabase
-                .from('usa_shipment_reports')
-                .update(dataToSave)
-                .eq('id', report.id);
+            const { error } = await supabase.rpc('ng_update_freight', { shipment_id: report.id, fields: dataToSave });
 
             if (error) throw error;
             addNotification({ type: 'success', title: 'Auditoría Guardada', message: `Remisión ${report.tripId} actualizada exitosamente.` });

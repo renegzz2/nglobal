@@ -1,3 +1,5 @@
+> La configuración vigente de acceso, secretos, webhooks y despliegue se describe en [README.md](README.md). Este manual conserva referencias de versiones anteriores.
+
 # Manual tecnico - nglobal Logistics
 
 ## 1. Resumen ejecutivo

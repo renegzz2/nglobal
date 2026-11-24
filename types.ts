@@ -57,9 +57,11 @@ export interface StrategicProjection extends BaseDBEntity {
   liderProyectoId?: string;
   proyectoId: string;
   productoId: string;
-  clientId?: string; 
+  clientId?: string;
   presupuestoMonetario: number;
   venta2023Referencia: number;
+  venta2025Referencia?: number;
+  precioCompra2025?: number;
   ng_2025: number;
   ss_2025: number;
   precioVenta2025?: number;
@@ -200,6 +202,7 @@ export interface EscalaDB extends BaseDBEntity {
 export interface TipoUnidad extends BaseDBEntity {
     unidad: string;
     capacidad: string;
+    focused?: string;
     nombre?: string;
 }
 
@@ -248,11 +251,13 @@ export interface UsaShipmentReport extends BaseDBEntity {
   stopOverProjectId?: string;
   loteOriginalId?: string | null;
   loteSecundarioId?: string | null;
+  lotesAsociados?: string[];
   lineaTransportistaId?: string;
   unidadTransporteId?: string;
   arrivedAtStopOver?: string;
   departedFromStopOver?: string;
   clientId: string;
+  clientIds?: string[];
   products: ProductQuantity[];
   logisticStatus: string;
   departureDateTime: string;
@@ -262,6 +267,7 @@ export interface UsaShipmentReport extends BaseDBEntity {
   responsibleId?: string;
   unitType?: string;
   driverName?: string;
+  driverPhone?: string;
   boxNumber?: string;
   tractorPlates?: string;
   caat?: string;
@@ -276,6 +282,7 @@ export interface UsaShipmentReport extends BaseDBEntity {
   comments?: string;
   incidents: Incident[];
   idealTemp?: number | string | null;
+  min_temp?: number | string | null;
   invoiceNumber?: string;
   invoiceUrl?: string;
   // MI DIOS: Campos para Carrier Scorecard
@@ -321,19 +328,4 @@ export interface InspeccionPayload {
   detalles_danos: Record<string, { peso: number; porcentaje: number }>;
   calidad_score: number;
   estatus: string;
-}
-
-export enum View {
-  DASHBOARD = 'DASHBOARD',
-  DATABASE = 'DATABASE',
-  USA_SHIPMENTS = 'USA_SHIPMENTS',
-  TIVE_MAP = 'TIVE_MAP',
-  QUALITY_INSPECTION = 'QUALITY_INSPECTION', // <-- Nueva vista
-  SETTINGS = 'SETTINGS',
-  FREIGHT_PAYMENTS = 'FREIGHT_PAYMENTS',
-  INVENTORY = 'INVENTORY',
-  POLICIES = 'POLICIES',
-  INSPECTION_QUALITY = 'INSPECTION_QUALITY',
-  INSPECTION_DASHBOARD = 'INSPECTION_DASHBOARD',
-  INSPECTION_INCIDENTS = 'INSPECTION_INCIDENTS'
 }

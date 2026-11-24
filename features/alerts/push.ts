@@ -1,4 +1,4 @@
-import { supabase } from './lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 const VAPID_PUBLIC_KEY = 'BN1TAYTDSoyi5zln7KKxZ4Va_QnzNF7H8cajpm0DQoWNrGRyZN38DcK-wGIGucS9nlWunUkkF4sgCFng2KreEZ0';
 
@@ -23,6 +23,8 @@ export const subscribeUserToPush = async (userName: string) => {
   }
 
   try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return false;
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       console.warn("❌ Permiso de notificaciones DENEGADO.");
@@ -45,11 +47,12 @@ export const subscribeUserToPush = async (userName: string) => {
       .from('push_subscriptions')
       .upsert(
         { 
+          user_id: user.id,
           user_name: userName, 
           subscription: subscription.toJSON() 
         }, 
         { 
-          onConflict: 'user_name',
+          onConflict: 'user_id',
           ignoreDuplicates: false 
         }
       );
@@ -76,14 +79,10 @@ export const subscribeUserToPush = async (userName: string) => {
 export const sendTestPush = async () => {
   try {
     const { data, error } = await supabase.functions.invoke('send-push', {
-      body: { 
-        title: 'TEST DE SISTEMA NGLOBAL', 
-        body: 'El canal de comunicación Push está ACTIVO y vinculado a su dispositivo.',
-        trip_id: 'DIAGNOSTICO'
-      }
+      body: { action: 'test' }
     });
     if (error) throw error;
-    return true;
+    return data?.success === true;
   } catch (err) {
     console.error("Error en test push:", err);
     return false;
