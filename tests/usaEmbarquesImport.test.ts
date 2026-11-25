@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { conciliarProductoExcel, crearPartidasDesdeExcel } from '../lib/usaEmbarquesImport.ts';
+import * as XLSX from 'xlsx';
+import { buscarCatalogoPorNombre, conciliarProductoExcel, crearPartidasDesdeExcel, leerLayoutEmbarque } from '../lib/usaEmbarquesImport.ts';
 import type { ProductoCatalog } from '../lib/usaEmbarquesImport.ts';
 
 const catalogo: ProductoCatalog[] = [
@@ -9,6 +10,92 @@ const catalogo: ProductoCatalog[] = [
     { id: 'a25', nombre_del_producto: 'Mango', alias_usa: 'Primera', config_usa: '25 lbs' },
     { id: 'b5', nombre_del_producto: 'Mango', alias_usa: 'Segunda', config_usa: '5 lbs' }
 ];
+
+test('lee los datos de salida y conserva el detalle de un layout con fecha y hora en columnas separadas', () => {
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet([['Catálogo']]), 'Lista');
+    const hoja = XLSX.utils.aoa_to_sheet([
+        ['TRANSPORTE', 'ESCOBAR', 'CLIENTE:', 'EXP GROUP LLC', null, 'PLACAS TRACTOR:', 'ABC123'],
+        ['OPERADOR', 'NOMBRE\n OPERADOR', 'FECHA Y HORA DE SALIDA:', 46347, 85800 / 86400, 'PLACAS CAJA:', '0007'],
+        ['NO. TELÉFONO', 1234567890, null, null, null, 'ECONÓMICO', 1],
+        [null, null, null, null, null, 'PIES', 53],
+        ['PRODUCTO', 'PALLET ', 'CAJAS ', 'CALIDAD', 'LBS'],
+        ['Mango', 1, 60, 'Primera', '5 LBS'],
+        ['Mango', 2, 80, 'Segunda', '25 LBS'],
+    ]);
+    hoja.G3.z = '00';
+    hoja.G3.w = '01';
+    hoja['!merges'] = [XLSX.utils.decode_range('D1:E1')];
+    XLSX.utils.book_append_sheet(libro, hoja, 'Layout');
+
+    const { datos, filas } = leerLayoutEmbarque(libro);
+    assert.deepEqual(datos, {
+        transportista: 'ESCOBAR', cliente: 'EXP GROUP LLC', placasTractor: 'ABC123', operador: 'NOMBRE OPERADOR',
+        salida: '2026-11-21T23:50:00', placasCaja: '0007', celular: '1234567890', economico: '01', pies: '53',
+    });
+    assert.deepEqual(crearPartidasDesdeExcel(filas, catalogo).map(p => [p.producto_id, p.numero_pallet, p.cantidad_cajas]),
+        [['a5', '1', 60], ['b25', '2', 80]]);
+});
+
+test('admite fecha y hora como texto y deja disponible la captura manual con un layout anterior', () => {
+    const libro = XLSX.utils.book_new();
+    const filas = [['PRODUCTO', 'PALLET', 'CAJAS'], ['Mango', 1, 60]];
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet([
+        ['FECHA DE SALIDA', '21/11/2026', 'HORA DE SALIDA', '12:05 a. m.'],
+        ...filas,
+    ]), 'Layout');
+    assert.equal(leerLayoutEmbarque(libro).datos.salida, '2026-11-21T00:05:00');
+    libro.Sheets.Layout = XLSX.utils.aoa_to_sheet(filas);
+    assert.deepEqual(leerLayoutEmbarque(libro).datos, {});
+    assert.equal(leerLayoutEmbarque(libro).filas.length, 1);
+});
+
+test('respeta los libros que usan el calendario de 1904 y una sola celda para la salida', () => {
+    const libro = XLSX.utils.book_new();
+    libro.Workbook = { WBProps: { date1904: true } };
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet([
+        ['FECHA Y HORA DE SALIDA', 44885.5],
+        ['PRODUCTO', 'CAJAS'],
+        ['Mango', 60],
+    ]), 'Layout');
+    assert.equal(leerLayoutEmbarque(libro).datos.salida, '2026-11-21T12:00:00');
+});
+
+test('lee la temperatura programada en Fahrenheit y un termógrafo único de las tarimas', () => {
+    const libro = XLSX.utils.book_new();
+    const hoja = XLSX.utils.aoa_to_sheet([
+        ['TEMPERATURA PROGRAMADA', '50°F'],
+        ['TEMPERATURA DE SALIDA (DIGITAL)', '55°F'],
+        ['PRODUCTO', 'PALLET', 'CAJAS', 'TERMÓGRAFO '],
+        ['Mango', 1, 60, 'K721794'],
+        ['Mango', 2, 60, ' k721794 '],
+        ['Mango', 3, 60, 'N/A'],
+        ['', null, null, 'OTRO'],
+    ]);
+    XLSX.utils.book_append_sheet(libro, hoja, 'Layout');
+
+    const layout = leerLayoutEmbarque(libro);
+    assert.equal(layout.datos.temperatura, 50);
+    assert.equal(layout.datos.termografo, 'K721794');
+    assert.equal(layout.variosTermografos, false);
+    assert.equal(layout.filas.length, 3);
+
+    hoja.D5.v = 'K000002';
+    hoja.B1.v = '0 °F';
+    const conflicto = leerLayoutEmbarque(libro);
+    assert.equal(conflicto.datos.temperatura, 0);
+    assert.equal(conflicto.datos.termografo, undefined);
+    assert.equal(conflicto.variosTermografos, true);
+});
+
+test('elige nombres abreviados solo cuando la coincidencia de catálogo es única', () => {
+    const clientes = ['EXP GROUP TX LLC', 'GRUPO EXP SAC'];
+    const transportes = ['TRANSPORTES ESCOBAR', 'ESCOBAR DEL NORTE'];
+    assert.equal(buscarCatalogoPorNombre('EXP GROUP LLC', clientes, String), clientes[0]);
+    assert.equal(buscarCatalogoPorNombre('Escobar', transportes.slice(0, 1), String), transportes[0]);
+    assert.equal(buscarCatalogoPorNombre('Escobar', transportes, String), undefined);
+    assert.equal(buscarCatalogoPorNombre('TRANSPORTES ESCOBAR', transportes, String), transportes[0]);
+});
 
 test('elige la variante que cumple nombre, calidad Y libras, en cualquier orden', () => {
     for (const productos of [catalogo, [...catalogo].reverse()]) {

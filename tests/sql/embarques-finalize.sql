@@ -69,13 +69,13 @@ begin
   end;
 
   resultado := public.ng_finalizar_embarque_usa(solicitud, public.fixture_embarque_datos(),
-    public.fixture_embarque_partidas(), public.fixture_embarque_fotos(solicitud));
+    public.fixture_embarque_partidas(), public.fixture_embarque_fotos(solicitud), ' +52 1234567890 ');
   if resultado->>'folio' is null or resultado->>'folio' !~ '^EMB-[0-9]{6}$'
     or resultado->>'folio' in ('EMB-000001', 'EMB-000002') then
     raise exception 'The dispatch must have an unused six-digit EMB folio';
   end if;
   if resultado is distinct from public.ng_finalizar_embarque_usa(solicitud, public.fixture_embarque_datos(),
-    public.fixture_embarque_partidas(), public.fixture_embarque_fotos(solicitud)) then
+    public.fixture_embarque_partidas(), public.fixture_embarque_fotos(solicitud), '0000000000') then
     raise exception 'The retry returned a different dispatch';
   end if;
 end
@@ -92,6 +92,7 @@ begin
     select 1 from public.usa_shipment_reports d join public.usa_embarques e on d.trip_id = e.folio_embarque
     where d.logistic_status = 'En Tránsito' and d.total_real_boxes = 25 and jsonb_array_length(d.products) = 2
       and d.products->0->>'invoice_number' = 'R1' and e.foto_remision <> 'pendiente'
+      and d.driver_phone = '+52 1234567890'
   ) then raise exception 'Evidence paths, folio, status or detail did not persist as expected'; end if;
 end
 $$;

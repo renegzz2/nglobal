@@ -37,6 +37,7 @@ interface DatosEmbarque {
     transportista_manual: string;
     fecha_salida: string;
     operador: string;
+    celular_operador: string;
     placas_caja: string;
     placas_tractor: string;
     economico: string;
@@ -56,6 +57,7 @@ export function extensionFotoEmbarque(archivo: Pick<File, 'type' | 'size'>): str
 export async function finalizarEmbarqueUsa(
     intento: IntentoEmbarque, datos: DatosEmbarque, partidas: PartidaCarga[], fotos: FotosEmbarque,
 ): Promise<{ folio: string }> {
+    const { celular_operador, ...cabecera } = datos;
     const { data: { user }, error: errorSesion } = await supabase.auth.getUser();
     if (errorSesion) throw errorSesion;
     if (!user || (intento.propietario && intento.propietario !== user.id)) {
@@ -96,11 +98,12 @@ export async function finalizarEmbarqueUsa(
 
     const { data, error } = await supabase.rpc('ng_finalizar_embarque_usa', {
         p_solicitud: intento.id,
-        p_datos: datos,
+        p_datos: cabecera,
         p_partidas: partidas.map(({ numero_pallet, producto_id, remision, mid, lote_pt, cantidad_cajas }) => ({
             numero_pallet, producto_id, remision, mid, lote_pt, cantidad_cajas,
         })),
         p_fotos: rutas,
+        p_celular_operador: celular_operador || null,
     });
     if (error) throw error;
     if (typeof data?.folio !== 'string') throw new Error('Supabase no confirmó el folio del despacho. Reintenta esta misma captura.');

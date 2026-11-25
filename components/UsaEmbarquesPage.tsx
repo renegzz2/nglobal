@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
-import { crearPartidasDesdeExcel } from '../lib/usaEmbarquesImport';
-import type { PartidaCarga, ProductoCatalog } from '../lib/usaEmbarquesImport';
+import { buscarCatalogoPorNombre, crearPartidasDesdeExcel, leerLayoutEmbarque } from '../lib/usaEmbarquesImport';
+import type { FilaExcel, PartidaCarga, ProductoCatalog } from '../lib/usaEmbarquesImport';
 import { extensionFotoEmbarque, finalizarEmbarqueUsa } from '../lib/usaEmbarquesFinalize';
 import type { FotosEmbarque, IntentoEmbarque } from '../lib/usaEmbarquesFinalize';
 
@@ -22,6 +22,11 @@ interface Transportista {
     linea?: string;
 }
 
+const nombreCliente = (cliente: Cliente) =>
+    cliente.nombre_cliente || cliente.nombre || cliente.razon_social || cliente.cliente || cliente.id;
+const nombreTransportista = (linea: Transportista) =>
+    linea.nombre_linea || linea.nombre || linea.razon_social || linea.linea || linea.id;
+
 export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({ onDispatchCreated }) => {
     const [activeTab, setActiveTab] = useState<1 | 2 | 3>(1);
 
@@ -32,6 +37,9 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
     const [proyectos, setProyectos] = useState<{ id: string; nombre: string }[]>([]);
     const [sucursales, setSucursales] = useState<{ id: string; proyecto_id: string; nombre_sucursal: string }[]>([]);
     const [errorCatalogos, setErrorCatalogos] = useState('');
+    const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
+    const [importando, setImportando] = useState(false);
+    const [estadoImportacion, setEstadoImportacion] = useState('');
 
     // --- ESTADOS GENERALES (Pestaña 1) ---
     const [clienteId, setClienteId] = useState('');
@@ -41,6 +49,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
     const [lineaTransporte, setLineaTransporte] = useState('');
     const [fechaSalida, setFechaSalida] = useState('');
     const [nombreOperador, setNombreOperador] = useState('');
+    const [celularOperador, setCelularOperador] = useState('');
     const [placasTractor, setPlacasTractor] = useState('');
     const [placasCaja, setPlacasCaja] = useState('');
     const [economico, setEconomico] = useState('');
@@ -51,7 +60,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
 
     // --- ESTADOS DE CARGA (Pestaña 2) ---
     const [cargaPartidas, setCargaPartidas] = useState<PartidaCarga[]>([]);
-    const [datosExcel, setDatosExcel] = useState<any[]>([]);
+    const [datosExcel, setDatosExcel] = useState<FilaExcel[]>([]);
 
     // --- ESTADOS DE FOTOS (Pestaña 3) ---
     const [fotos, setFotos] = useState<FotosEmbarque>({
@@ -121,11 +130,14 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
             setSucursales(sedes.data || []);
         };
 
-        cargarCatalogos();
+        void cargarCatalogos()
+            .catch(() => setErrorCatalogos('No se pudieron cargar los catálogos. Recarga la pantalla.'))
+            .finally(() => setCargandoCatalogos(false));
     }, []);
 
     // Validación de campos completos en Pestaña 1
     const validarPaso1 = () => {
+        if (importando) return false;
         if (!clienteId) { alert("Por favor selecciona un Cliente."); return false; }
         if (!proyectoId) { alert('Selecciona el proyecto de origen.'); return false; }
         if (!fechaSalida || Number.isNaN(new Date(fechaSalida).getTime())) { alert("Por favor ingresa la Fecha y hora de salida."); return false; }
@@ -149,57 +161,53 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
         }
     };
 
-    // Procesamiento del Layout de Excel respetando Pallets y conciliación por 3 criterios
-    const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+    const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.currentTarget.files?.[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-            try {
-                const bstr = evt.target?.result;
-                const wb = XLSX.read(bstr, { type: 'binary' });
-
-                const targetSheetName = wb.SheetNames.find(name => name.toLowerCase().includes('layout')) || wb.SheetNames[0];
-                const ws = wb.Sheets[targetSheetName];
-
-                const sheetRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
-                // Ubicar la fila de encabezados
-                let headerRowIndex = sheetRows.findIndex(row => 
-                    row && row.some((cell: any) => String(cell || '').trim().toUpperCase() === 'PRODUCTO') &&
-                    row.some((cell: any) => String(cell || '').trim().toUpperCase().includes('CAJAS'))
-                );
-
-                if (headerRowIndex === -1) headerRowIndex = 8;
-
-                const rawData: any[] = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex });
-
-                const cleanData = rawData.map(row => {
-                    const normalized: any = {};
-                    Object.keys(row).forEach(key => {
-                        normalized[key.trim().toUpperCase()] = row[key];
-                    });
-                    return normalized;
-                }).filter(row => row['PRODUCTO'] && (row['CAJAS'] !== undefined || row['PALLET'] !== undefined));
-
-                setDatosExcel(cleanData);
-
-                // Mantener las filas y pallets; asignar solo coincidencias únicas.
-                const partidasGeneradas = crearPartidasDesdeExcel(cleanData, productosCatalogo);
-
-                setCargaPartidas(partidasGeneradas);
-
-                const palletsUnicos = new Set(partidasGeneradas.map(p => p.numero_pallet)).size;
-                const pendientes = partidasGeneradas.filter(p => !p.producto_id).length;
-                alert(`Layout procesado: Se cargaron ${partidasGeneradas.length} partidas distribuidas en ${palletsUnicos} pallets.${pendientes ? ` Hay ${pendientes} partida(s) pendientes de selección manual de producto.` : ''}`);
-            } catch (err: any) {
-                console.error(err);
-                alert("Error al leer el archivo Excel: " + err.message);
+        e.currentTarget.value = '';
+        setImportando(true);
+        setEstadoImportacion('');
+        try {
+            const { datos, filas, variosTermografos } = leerLayoutEmbarque(XLSX.read(await file.arrayBuffer(), { type: 'array' }));
+            const avisos: string[] = [];
+            if (datos.cliente) {
+                const cliente = buscarCatalogoPorNombre(datos.cliente, clientesList, nombreCliente);
+                setClienteId(cliente?.id ?? '');
+                if (!cliente) avisos.push(`Selecciona el cliente del Excel: ${datos.cliente}.`);
             }
-        };
+            if (datos.transportista) {
+                const linea = buscarCatalogoPorNombre(datos.transportista, transportistasList, nombreTransportista);
+                setLineaTransporteId(linea?.id ?? '');
+                setLineaTransporte(linea ? '' : datos.transportista);
+                if (!linea) avisos.push('Revisa la línea transportista capturada desde el Excel.');
+            }
+            if (datos.salida) setFechaSalida(datos.salida);
+            if (datos.operador) setNombreOperador(datos.operador);
+            if (datos.celular) setCelularOperador(datos.celular);
+            if (datos.placasTractor) setPlacasTractor(datos.placasTractor);
+            if (datos.placasCaja) setPlacasCaja(datos.placasCaja);
+            if (datos.economico) setEconomico(datos.economico);
+            if (datos.pies) setPies(datos.pies);
+            if (datos.temperatura !== undefined) setTemperaturaViaje(datos.temperatura);
+            if (datos.termografo) setTermografo(datos.termografo);
+            if (variosTermografos) {
+                setTermografo('');
+                avisos.push('El Excel trae varios termógrafos. Indica cuál corresponde a la salida.');
+            }
 
-        reader.readAsBinaryString(file);
+            const partidas = crearPartidasDesdeExcel(filas, productosCatalogo);
+            setDatosExcel(filas);
+            setCargaPartidas(partidas);
+            const tarimas = new Set(partidas.map(p => p.numero_pallet)).size;
+            const pendientes = partidas.filter(p => !p.producto_id).length;
+            if (pendientes) avisos.push(`Selecciona el producto de ${pendientes} partida(s) en Tarimas.`);
+            setEstadoImportacion([`Excel cargado. ${partidas.length} partidas en ${tarimas} tarimas.`, ...avisos].join(' '));
+        } catch (error) {
+            setEstadoImportacion(error instanceof Error ? error.message : 'No se pudo leer el Excel.');
+        } finally {
+            setImportando(false);
+        }
     };
 
     const agregarPartidaManual = () => {
@@ -277,9 +285,6 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
         const nuevasDiscrepancias: string[] = [];
 
         cargaPartidas.forEach((partida, index) => {
-            const prodObj = productosCatalogo.find(p => p.id === partida.producto_id);
-            const nombreProd = prodObj?.nombre_del_producto || 'No asignado';
-
             const coincidenciaExcel = datosExcel.find(fila => 
                 String(fila.REMISION || '').trim().toUpperCase() === partida.remision.toUpperCase() &&
                 String(fila.MID || '').trim().toUpperCase() === partida.mid.toUpperCase() &&
@@ -289,7 +294,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
             if (!coincidenciaExcel) {
                 nuevasDiscrepancias.push(`Pallet #${partida.numero_pallet} (Partida ${index + 1}): La Remisión ${partida.remision} y MID ${partida.mid} no coinciden con este pallet en el Excel.`);
             } else {
-                const cajasExcel = parseFloat(coincidenciaExcel.CAJAS || 0);
+                const cajasExcel = parseFloat(String(coincidenciaExcel.CAJAS || 0));
                 if (cajasExcel !== partida.cantidad_cajas) {
                     nuevasDiscrepancias.push(`Pallet #${partida.numero_pallet}: Cajas no coinciden. Físico: ${partida.cantidad_cajas} vs Excel: ${cajasExcel}.`);
                 }
@@ -319,6 +324,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                 transportista_manual: lineaTransporte.trim(),
                 fecha_salida: new Date(fechaSalida).toISOString(),
                 operador: nombreOperador.trim(),
+                celular_operador: celularOperador.trim(),
                 placas_caja: placasCaja.trim(),
                 placas_tractor: placasTractor.trim(),
                 economico: economico.trim(),
@@ -395,6 +401,17 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                         </div>
 
                         <div>
+                            <label className="block w-full border-2 border-dashed border-sky-400/40 bg-sky-950 text-sky-300 text-center p-3.5 rounded-2xl cursor-pointer focus-within:ring-2 focus-within:ring-sky-500">
+                                <span className="text-xs font-black uppercase tracking-wider">
+                                    {cargandoCatalogos ? 'Cargando catálogos…' : importando ? 'Leyendo Excel…' : 'Cargar layout de Excel'}
+                                </span>
+                                <input type="file" accept=".xlsx,.xls" onChange={handleExcelUpload}
+                                    disabled={cargandoCatalogos || importando} className="sr-only" />
+                            </label>
+                            {estadoImportacion && <p role="status" className="mt-2 text-xs text-[#002D62]">{estadoImportacion}</p>}
+                        </div>
+
+                        <div>
                             <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider mb-1">Cliente *</label>
                             <select
                                 value={clienteId}
@@ -405,7 +422,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                                 <option value="">Selecciona un cliente...</option>
                                 {clientesList.map(c => (
                                     <option key={c.id} value={c.id}>
-                                        {c.nombre_cliente || c.nombre || c.razon_social || c.cliente || c.id}
+                                        {nombreCliente(c)}
                                     </option>
                                 ))}
                             </select>
@@ -440,6 +457,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                                 type="datetime-local"
                                 value={fechaSalida}
                                 onChange={e => setFechaSalida(e.target.value)}
+                                step={1}
                                 className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
                                 required
                             />
@@ -447,28 +465,24 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
 
                         <div>
                             <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider mb-1">Línea transportista *</label>
-                            {transportistasList.length > 0 ? (
+                            {transportistasList.length > 0 && (
                                 <select
                                     value={lineaTransporteId}
                                     onChange={e => setLineaTransporteId(e.target.value)}
                                     className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200"
-                                    required
                                 >
-                                    <option value="">Selecciona transportista...</option>
-                                    {transportistasList.map(t => {
-                                        const label = t.nombre_linea || t.nombre || t.razon_social || t.linea || t.id;
-                                        return (
-                                            <option key={t.id} value={t.id}>{label}</option>
-                                        );
-                                    })}
+                                    <option value="">Escribir transportista</option>
+                                    {transportistasList.map(t => <option key={t.id} value={t.id}>{nombreTransportista(t)}</option>)}
                                 </select>
-                            ) : (
+                            )}
+                            {!lineaTransporteId && (
                                 <input
                                     type="text"
+                                    aria-label="Nombre de la línea de transporte"
                                     placeholder="Nombre de la línea de transporte"
                                     value={lineaTransporte}
                                     onChange={e => setLineaTransporte(e.target.value)}
-                                    className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
+                                    className="mt-2 w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
                                     required
                                 />
                             )}
@@ -483,6 +497,18 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                                 onChange={e => setNombreOperador(e.target.value)}
                                 className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
                                 required
+                            />
+                        </div>
+
+                        <div>
+                            <label htmlFor="usa-embarque-celular" className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider mb-1">Celular del operador</label>
+                            <input
+                                id="usa-embarque-celular"
+                                type="tel"
+                                value={celularOperador}
+                                onChange={e => setCelularOperador(e.target.value)}
+                                maxLength={40}
+                                className="w-full bg-[#001D40] border border-white/15 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400"
                             />
                         </div>
 
@@ -552,6 +578,7 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                                 <label className="block text-[11px] font-bold text-[#002D62] uppercase tracking-wider mb-1">Temp. programada (°F) *</label>
                                 <input
                                     type="number"
+                                    step="any"
                                     placeholder="Ej. 45"
                                     value={temperaturaViaje}
                                     onChange={e => setTemperaturaViaje(e.target.value === '' ? '' : parseFloat(e.target.value))}
@@ -599,11 +626,6 @@ export const UsaEmbarquesPage: React.FC<{ onDispatchCreated?: () => void }> = ({
                                 + Agregar Partida
                             </button>
                         </div>
-
-                        <label className="block w-full border-2 border-dashed border-sky-400/40 bg-sky-950 hover:bg-sky-500 text-sky-300 text-center py-3.5 rounded-2xl cursor-pointer transition-all">
-                            <span className="text-xs font-black uppercase tracking-wider">Cargar Layout de Excel (.xlsx)</span>
-                            <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} className="hidden" />
-                        </label>
 
                         <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
                             {cargaPartidas.map((partida, idx) => (
